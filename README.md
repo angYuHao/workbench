@@ -75,6 +75,24 @@ npm run tauri build    # 打包（要看下面那条）
 npx tauri build -d --no-bundle     # 产物在 src-tauri\target\debug\个人工作台.exe
 ```
 
+要在本机出安装包，得把三个工具文件预先放进 `%LOCALAPPDATA%\tauri\`（CLI 里没有环境变量开关，只认这个目录）：
+
+| 放哪儿 | 内容 |
+|---|---|
+| `tauri\WixTools314\` | `wix314-binaries.zip` 解出来的内容，根目录直接是 `candle.exe`、`light.exe`、`Wix*Extension.dll` |
+| `tauri\NSIS\` | `nsis-3.11.zip` 解出来，**去掉 zip 里那层 `nsis-3.11\` 目录**，留下 `Bin\`、`Stubs\`、`Plugins\`、`Include\` |
+| `tauri\NSIS\Plugins\x86-unicode\additional\` | 单独放 `nsis_tauri_utils.dll`（这个要单独下载，SHA-1 校验得过） |
+
+三个文件从这些地方下（校验和是从本机那份 `cli.win32-x64-msvc.node` 里切出来的常量，抄一份钉在这儿，下错了不会报错、只会又去联网下）：
+
+- `https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip` — SHA-256 `6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31`
+- `https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip` — SHA-1 `EF7FF767E5CBD9EDD22ADD3A32C9B8F4500BB10D`
+- `https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll` — SHA-1 `75197FEE3C6A814FE035788D1C34EAD39349B860`
+
+CI 在 runner 上自己下这三个，不受本机网络限制；本机这份缓存只存在本机，`.gitignore` 不收它（它在仓库外）。
+
+**`bundle > windows > wix > language` 必须是 `zh-CN`**：WiX 3 生成的 MSI 数据库默认代码页是 1252（西欧），产品名「个人工作台」进去就是 `error LGHT0311: characters that are not available in the database code page '1252'`，`light.exe` 直接失败，跟机器无关。NSIS 是 Unicode 的，没这个坑。
+
 debug 产物照样嵌了前端资源、照样吃 `tauri.conf.json` 里的 CSP，只是额外带 devtools。反过来，`tauri dev` 的页面来自 vite（`devUrl`），**不吃那份 CSP**，安全相关的改动必须用打包出来的 exe 验。
 
 依赖一律离线复用，不要随手 `npm install` / `cargo add`：新依赖优先用 `Cargo.lock` 里已有的版本（比如 `reqwest` 是 rig 自带的），装包由维护者本机手动做。
