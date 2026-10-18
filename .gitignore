@@ -1,0 +1,15 @@
+# 依赖与构建产物：target 有 31 GB，误 add 一次就废掉整个仓库
+node_modules/
+dist/
+src-tauri/target/
+
+# tauri-build 每次编译重写的权限清单，进来只是噪音
+src-tauri/gen/schemas/
+
+# 本机跑出来的日志
+*.log
+
+# 没有版本控制时代留下的回退手段，只在本机保命，不进仓库
+.removed-*/
+.icons-backup-*/
+.archive/

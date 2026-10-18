@@ -1,0 +1,239 @@
+/* ---- 设置窗口：侧栏底部入口点开，左边分组导航、右边一屏一节 ---- */
+.settings-shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 360px;
+  height: min(560px, calc(100vh - 190px));
+}
+
+.settings-nav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  width: 208px;
+  padding: 16px 12px;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.settings-nav-group {
+  margin: 14px 8px 4px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--color-text-secondary);
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--color-primary-faint);
+}
+
+.settings-nav-item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.settings-nav-item.on {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.settings-nav-empty {
+  padding: 10px 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.settings-main {
+  flex: 1;
+  min-width: 0;
+  padding: 24px 28px;
+  overflow-y: auto;
+}
+
+.settings-h {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.settings-sub {
+  margin: 4px 0 20px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.settings-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+/** 窗口面板本身就是卡片，这里只描边，不再叠第二层阴影 */
+.settings-card {
+  padding: 2px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.settings-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+}
+
+.settings-line + .settings-line {
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-line-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.settings-line-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-line-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.settings-line-desc {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.settings-row-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.settings-empty {
+  padding: 22px 0;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+/** 设置里的 AI 日志：只列最近一百行。行很长（响应开头能到 2000 字），
+    不换行就得横向拖半天，所以这里用 pre-wrap，纵向自己滚 */
+.settings-log {
+  max-height: 260px;
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  tab-size: 4;
+}
+
+.settings-log-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ---- 设置弹窗里的就地动作与反馈 ---- */
+.form-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field-hint {
+  margin: -6px 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.field-hint.ok {
+  color: var(--color-success);
+}
+
+.field-hint.bad {
+  color: var(--color-danger);
+}
+
+/* ---- AI 分类确认窗 ---- */
+.smart-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.smart-bar-label {
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+
+.smart-reason {
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+
+.smart-foot {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+/** 深色下主色只有 8% 透明度会糊成一片，图标底改实一点、字色提亮一档才读得清 */
+body.dark .settings-nav-item:hover:not(.on) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+body.dark .settings-nav-item.on,
+body.dark .settings-line-icon {
+  background: rgba(79, 107, 237, 0.2);
+  color: #a9b8ff;
+}
+

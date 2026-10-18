@@ -1,0 +1,113 @@
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes msgIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+body.dark {
+  --color-bg: #111827;
+  --color-card: #1f2937;
+  --color-sidebar: #0b1220;
+  --color-text: #e5e7eb;
+  --color-text-secondary: #9ca3af;
+  --color-sidebar-text: #94a3b8;
+  --color-border: #374151;
+  --color-row-stripe: rgba(255, 255, 255, 0.03);
+}
+
+body.dark ::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+/* highlight.js 只引了浅色版 github.css，深色主题下这些 token 会糊在黑底上，
+   所以按自己的配色覆盖一遍：markdown 代码块和文本/代码预览共用这套色板 */
+body.dark .md-body .hljs,
+body.dark .text-view .hljs {
+  color: #d6deeb;
+}
+body.dark .md-body .hljs-comment,
+body.dark .text-view .hljs-comment,
+body.dark .md-body .hljs-quote,
+body.dark .text-view .hljs-quote {
+  color: #7c8ea6;
+  font-style: italic;
+}
+body.dark .md-body .hljs-keyword,
+body.dark .text-view .hljs-keyword,
+body.dark .md-body .hljs-selector-tag,
+body.dark .text-view .hljs-selector-tag,
+body.dark .md-body .hljs-doctag,
+body.dark .text-view .hljs-doctag {
+  color: #c792ea;
+}
+body.dark .md-body .hljs-string,
+body.dark .text-view .hljs-string,
+body.dark .md-body .hljs-regexp,
+body.dark .text-view .hljs-regexp,
+body.dark .md-body .hljs-addition,
+body.dark .text-view .hljs-addition {
+  color: #9ecb7f;
+}
+body.dark .md-body .hljs-number,
+body.dark .text-view .hljs-number,
+body.dark .md-body .hljs-literal,
+body.dark .text-view .hljs-literal,
+body.dark .md-body .hljs-meta,
+body.dark .text-view .hljs-meta {
+  color: #d19a66;
+}
+body.dark .md-body .hljs-title,
+body.dark .text-view .hljs-title,
+body.dark .md-body .hljs-attr,
+body.dark .text-view .hljs-attr,
+body.dark .md-body .hljs-attribute,
+body.dark .text-view .hljs-attribute,
+body.dark .md-body .hljs-variable,
+body.dark .text-view .hljs-variable {
+  color: #61afef;
+}
+body.dark .md-body .hljs-built_in,
+body.dark .text-view .hljs-built_in,
+body.dark .md-body .hljs-type,
+body.dark .text-view .hljs-type,
+body.dark .md-body .hljs-symbol,
+body.dark .text-view .hljs-symbol,
+body.dark .md-body .hljs-bullet,
+body.dark .text-view .hljs-bullet {
+  color: #56b6c2;
+}
+body.dark .md-body .hljs-section,
+body.dark .text-view .hljs-section,
+body.dark .md-body .hljs-name,
+body.dark .text-view .hljs-name,
+body.dark .md-body .hljs-tag,
+body.dark .text-view .hljs-tag,
+body.dark .md-body .hljs-deletion,
+body.dark .text-view .hljs-deletion {
+  color: #e06c75;
+}

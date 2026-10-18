@@ -1,0 +1,11 @@
+/* 唯一样式入口。分文件只是把 1285 行切成能读的段，加载顺序 = 这里的书写顺序，
+   也就是原来那份文件的顺序：层叠靠源顺序生效（尤其末尾的 body.dark 覆盖块），
+   所以**不要按字母或按主题重排下面这八行**，要挪样式请在对应段内挪。 */
+@import "./tokens.css";
+@import "./layout.css";
+@import "./shell.css";
+@import "./preview-doc.css";
+@import "./preview-sheet.css";
+@import "./settings.css";
+@import "./tools.css";
+@import "./misc.css";

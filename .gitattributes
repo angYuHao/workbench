@@ -1,0 +1,9 @@
+# 行尾定死：入库是 LF，检出也是 LF。
+# 这台机器 core.autocrlf=true，不写这份文件的话别人 clone 到 Windows 上会检出成 CRLF，
+# .rs 尤其容易被换出一堆伪 diff；定死之后谁 clone 都一样。
+* text=auto eol=lf
+
+# 图片资源：不做换行转换，也别指望能 diff
+*.png binary
+*.ico binary
+*.icns binary

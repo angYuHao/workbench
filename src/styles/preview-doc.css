@@ -1,0 +1,287 @@
+/* ---- Markdown 预览 ---- */
+.md-body {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.md-body > *:first-child {
+  margin-top: 0;
+}
+
+.md-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  margin: 18px 0 8px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.md-body h1 {
+  font-size: 21px;
+}
+
+.md-body h2 {
+  font-size: 18px;
+}
+
+.md-body h3 {
+  font-size: 16px;
+}
+
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  font-size: 14px;
+}
+
+.md-body h1,
+.md-body h2 {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.md-body p,
+.md-body ul,
+.md-body ol,
+.md-body blockquote {
+  margin: 0 0 12px;
+}
+
+.md-body ul,
+.md-body ol {
+  padding-left: 22px;
+}
+
+.md-body li {
+  margin: 3px 0;
+}
+
+.md-body li > ul,
+.md-body li > ol {
+  margin: 3px 0;
+}
+
+.md-body li::marker {
+  color: var(--color-text-secondary);
+}
+
+.md-body a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.md-body a:hover {
+  text-decoration: underline;
+}
+
+.md-body blockquote {
+  padding: 2px 12px;
+  border-left: 3px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.md-body hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 16px 0;
+}
+
+.md-body img {
+  max-width: 100%;
+  border-radius: var(--radius-control);
+}
+
+.md-body table {
+  width: 100%;
+  margin: 0 0 12px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.md-body th,
+.md-body td {
+  border: 1px solid var(--color-border);
+  padding: 6px 10px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.md-body th {
+  background: var(--color-bg);
+  font-weight: 600;
+}
+
+.md-body tr:nth-child(even) td {
+  background: var(--color-row-stripe);
+}
+
+/* 代码块：底色/圆角/滚动都由 pre 负责，highlight.js 的 .hljs 只留上色，
+   否则它自带的浅色铺底会在深色主题里盖掉整块，长行也会把侧栏撑宽 */
+.md-body pre {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: normal;
+}
+
+.md-body pre code {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  font-family: Consolas, "Courier New", monospace;
+  color: inherit;
+}
+
+.md-body :not(pre) > code {
+  padding: 1px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+}
+
+.md-body .hljs {
+  display: block;
+  padding: 0;
+  background: transparent;
+  overflow: visible;
+  color: var(--color-text);
+}
+
+.md-body pre::-webkit-scrollbar {
+  height: 8px;
+}
+
+.md-body input[type="checkbox"] {
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+/* ---- Office 文档预览（docx / xlsx 解析出来的结构） ---- */
+.office-doc {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.office-doc p {
+  margin: 0 0 8px;
+}
+
+.office-h {
+  font-weight: 600;
+  margin: 12px 0 8px;
+}
+
+.office-h1 {
+  font-size: 20px;
+}
+
+.office-h2 {
+  font-size: 17px;
+}
+
+.office-h3 {
+  font-size: 15px;
+}
+
+.office-h4,
+.office-h5,
+.office-h6 {
+  font-size: 14px;
+}
+
+.office-li {
+  padding-left: 18px;
+  margin-bottom: 4px;
+}
+
+/* ---- 旧版 .doc：docx-preview 读不了 OLE 复合文档，只能自研抽正文，所以版式是简化的一套 ---- */
+.office-table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.office-table td {
+  border: 1px solid var(--color-border);
+  padding: 4px 8px;
+  min-width: 48px;
+  max-width: 320px;
+  vertical-align: top;
+}
+
+/* ---- docx：页面尺寸/页边距/字号由 docx-preview 注入的 .docx-wrapper、section.docx 决定，这里只套滚动容器 ---- */
+.docx-scroll {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-icon);
+}
+
+.docx-scroll .docx-wrapper {
+  background: transparent;
+  padding: 16px;
+  /** 库里是 flex+居中：预览栏比 A4 窄时页面会左右两边一起溢出，左边那截滚不到。改成块级居中，放不下就贴左、右侧照常滚动 */
+  display: block;
+}
+
+.docx-scroll .docx-wrapper > section.docx {
+  margin: 0 auto 16px;
+}
+
+/* ---- 文本/代码预览：整份文件等宽排版，长行横向滚动；上色用 highlight.js 的 github 主题 ---- */
+.text-view {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  tab-size: 4;
+}
+
+/** .hljs 自带白底和 1em 内边距，底色/边框已经由 .text-view 给了，这里剥掉，只留它的字色。
+    github.css 里还有 `pre code.hljs { padding: 1em }`，权重不低，所以这里得写成 pre.text-view > code.hljs */
+.text-view code,
+pre.text-view > code.hljs {
+  display: block;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: inherit;
+  /** 让 .text-view 自己做唯一的横滚容器，别在 code 上再套一层滚动条 */
+  overflow: visible;
+}
+

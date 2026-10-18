@@ -1,0 +1,48 @@
+:root {
+  --color-primary: #4f6bed;
+  --color-primary-soft: rgba(79, 107, 237, 0.08);
+  --color-primary-faint: rgba(79, 107, 237, 0.06);
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-bg: #f5f7fa;
+  --color-card: #ffffff;
+  --color-sidebar: #1e293b;
+  --color-text: #1f2937;
+  --color-text-secondary: #6b7280;
+  --color-sidebar-text: #cbd5e1;
+  --color-border: #e5e7eb;
+  --color-row-stripe: rgba(0, 0, 0, 0.02);
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --radius-icon: 6px;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --side-pane-width: 200px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Segoe UI", "微软雅黑", -apple-system, "PingFang SC", sans-serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+a {
+  color: var(--color-primary);
+}
+
