@@ -18,8 +18,9 @@ pub fn scan_desktop(conn: &Connection) -> AppResult<Vec<DesktopItem>> {
     let _ = std::fs::create_dir_all(&icon_dir);
 
     let mut items = Vec::new();
+    let own = OwnExe::this();
     for desktop in crate::win::desktop::all_desktops() {
-        scan_directory(&desktop, 0, &rules, &icon_dir, &mut items);
+        scan_directory(&desktop, 0, &rules, &icon_dir, own.as_ref(), &mut items);
     }
     items.sort_by_key(|a| a.name.to_lowercase());
     items.dedup_by(|a, b| a.path == b.path);
@@ -45,6 +46,42 @@ fn mark_registered(items: &mut [DesktopItem], known: &std::collections::HashSet<
     }
 }
 
+/// 扫描要绕开工作台自己：桌面上那个快捷方式指的就是这个程序，
+/// 让它进启动器等于「用一个工作台去整理放着这个工作台的桌面」。
+/// 开发时跑的是 `target\debug` 里那份、快捷方式指的是装机那份，两个路径不一样，
+/// 所以除了完整路径相等，还按 exe 的文件名认——桌面这种场景里同名文件基本只有它自己。
+struct OwnExe {
+    file: String,
+    full: String,
+}
+
+/// Windows 路径比较用：去正反斜杠、去 `\\?\` 前缀、折小写
+fn norm_path(p: &Path) -> String {
+    let raw = p.to_string_lossy();
+    let raw = raw.strip_prefix(r"\\?\").unwrap_or(&raw);
+    raw.replace('\\', "/").to_ascii_lowercase()
+}
+
+impl OwnExe {
+    fn this() -> Option<OwnExe> {
+        let path = std::env::current_exe().ok()?;
+        Some(OwnExe {
+            file: path.file_name()?.to_string_lossy().to_ascii_lowercase(),
+            full: norm_path(&path),
+        })
+    }
+
+    fn is_this(&self, path: &Path, target: &str) -> bool {
+        [path, Path::new(target)].into_iter().any(|cand| {
+            norm_path(cand) == self.full
+                || cand
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_ascii_lowercase() == self.file)
+                    .unwrap_or(false)
+        })
+    }
+}
+
 /// 桌面根目录连同里面的子文件夹一起翻，任何类型的文件都算待整理内容；
 /// 文件夹本身只往里走不单独成项，避免「连文件夹一起搬」和「搬它里面的文件」重复。
 fn scan_directory(
@@ -52,6 +89,7 @@ fn scan_directory(
     depth: usize,
     rules: &[DesktopRule],
     icon_dir: &Path,
+    own: Option<&OwnExe>,
     items: &mut Vec<DesktopItem>,
 ) {
     let entries = match std::fs::read_dir(dir) {
@@ -70,13 +108,23 @@ fn scan_directory(
             if file_name.eq_ignore_ascii_case(ORGANIZE_DIR) || depth >= SCAN_MAX_DEPTH {
                 continue;
             }
-            scan_directory(&path.to_string_lossy(), depth + 1, rules, icon_dir, items);
+            scan_directory(
+                &path.to_string_lossy(),
+                depth + 1,
+                rules,
+                icon_dir,
+                own,
+                items,
+            );
             continue;
         }
 
         let ext = extension_of(&path);
         let is_lnk = ext == "lnk";
         let target = launch_target(&path);
+        if own.map(|o| o.is_this(&path, &target)).unwrap_or(false) {
+            continue;
+        }
         let display_name = if is_lnk {
             path.file_stem()
                 .map(|s| s.to_string_lossy().to_string())
@@ -656,6 +704,41 @@ mod tests {
         // 真正的图片文件不受这条影响
         assert_eq!(category_ext(false, "ico", ""), "ico");
         assert_eq!(match_category("logo", category_ext(false, "ico", ""), &rules), "图片");
+    }
+
+    #[test]
+    fn the_scanner_skips_its_own_executable_and_any_shortcut_pointing_at_it() {
+        let dir = sandbox("self-exe");
+        let own_file = touch(&dir, "workbench.exe");
+        touch(&dir, "别的.exe");
+        let rules = vec![rule("其他", None, None, true)];
+        let icon_dir = dir.join("icons");
+        std::fs::create_dir_all(&icon_dir).unwrap();
+        let own = OwnExe {
+            file: "workbench.exe".to_string(),
+            full: norm_path(&own_file),
+        };
+
+        let mut items = Vec::new();
+        scan_directory(&s(&dir), 0, &rules, &icon_dir, Some(&own), &mut items);
+        assert_eq!(
+            items.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(),
+            vec!["别的.exe"],
+            "自己那份不该进扫描结果"
+        );
+
+        // 开发跑 target\\debug 那份、快捷方式指装机那份：路径不同但同名，只比路径会漏
+        let installed = sandbox("self-installed");
+        let same_name = touch(&installed, "WorkBench.EXE");
+        assert!(own.is_this(&same_name, &s(&same_name)), "换个目录的同名 exe 也该认出来");
+        let mut second = Vec::new();
+        scan_directory(&s(&installed), 0, &rules, &icon_dir, Some(&own), &mut second);
+        assert!(second.is_empty(), "{:?}", second);
+
+        // 拿不到自身路径（current_exe 失败）时宁可多列，不能凭空跳过东西
+        let mut blind = Vec::new();
+        scan_directory(&s(&dir), 0, &rules, &icon_dir, None, &mut blind);
+        assert_eq!(blind.len(), 2, "认不出自己时一项都不该被跳掉");
     }
 
     #[test]
