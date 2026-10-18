@@ -1,0 +1,43 @@
+name: Release
+
+# 只有推 v 开头的 tag 才跑；日常 push main 不动它
+on:
+  push:
+    tags:
+      - "v*"
+
+# 建 Release 和传安装包要写仓库内容，就这一项权限
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # 只认 package-lock.json，装出来的东西和本机一致
+      - name: 装前端依赖
+        run: npm ci
+
+      # tauri build 会先跑 beforeBuildCommand（tsc && vite build），
+      # 再到 GitHub 下 WiX 和 NSIS —— 这两步在本机是做不到的，runner 上网不受限
+      - name: 编译并打包
+        run: npm run tauri build
+
+      - name: 发布 Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          msi=(src-tauri/target/release/bundle/msi/*.msi)
+          nsis=(src-tauri/target/release/bundle/nsis/*.exe)
+          ls -l "${msi[@]}" "${nsis[@]}"
+          # 重跑同一个 tag 时 Release 已经存在，别报错，改覆盖资产
+          gh release create "$TAG" --generate-notes --title "$TAG" "${msi[@]}" "${nsis[@]}" \
+            || gh release upload "$TAG" --clobber "${msi[@]}" "${nsis[@]}"
