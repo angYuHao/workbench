@@ -6,6 +6,7 @@ import {
 } from "@tauri-apps/plugin-autostart";
 import * as api from "../api/categories";
 import { getSettings, setCloseToTray, setSetting } from "../api/settings";
+import { useDesktopStore } from "./desktop";
 import type { DesktopRule } from "../types";
 
 type Theme = "light" | "dark";
@@ -33,7 +34,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   loadRules: async () => set({ rules: await api.getRules() }),
   saveRule: async (rule) => {
     await api.saveRule(rule);
-    await get().loadRules();
+    // 规则里的分类名改了，后端会连分类表和桌面整理目录一起改名；
+    // 分类树不重读的话，卡片还顶着旧名字，看着像改名没生效
+    await Promise.all([get().loadRules(), useDesktopStore.getState().loadCategories()]);
   },
   removeRule: async (id) => {
     await api.deleteRule(id);

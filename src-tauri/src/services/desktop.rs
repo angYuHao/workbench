@@ -252,6 +252,164 @@ fn free_dest(dir: &Path, src: &Path, file_name: &str) -> std::path::PathBuf {
     dest
 }
 
+/// 改一条分类规则，并把改过的分类名一路带走。
+/// 只写 `desktop_rules` 的话：分类表还是旧名（卡片和分类树不动），下次整理又会在旁边另开一个
+/// 新名目录，旧目录成了没人管的孤儿，而 `organize_logs.to_path` 和卡片的 `target` 还指着旧路径
+/// ——「恢复整理」和双击启动会一起坏掉。所以规则改名 = 规则 + 分类 + 目录 + 记着旧路径的行。
+/// 新名撞车要**在写规则之前**就问掉，否则留下「规则改了、分类和目录没跟上」的半状态。
+pub fn save_rule_with_rename(
+    conn: &Connection,
+    rule: &DesktopRule,
+    desktop: &Path,
+) -> AppResult<DesktopRule> {
+    let old = categories::get_rules(conn)?
+        .into_iter()
+        .find(|r| r.id == rule.id)
+        .map(|r| r.category);
+    if let Some(old) = old.as_ref().filter(|o| o.trim() != rule.category.trim()) {
+        check_rule_rename(conn, desktop, old, &rule.category, rule.id)?;
+    }
+    let saved = categories::save_rule(conn, rule)?;
+    if let Some(old) = old.filter(|o| *o != saved.category) {
+        propagate_rule_rename(conn, desktop, &old, &saved.category, rule.id)?;
+    }
+    Ok(saved)
+}
+
+/// 改名前先审一遍：名字没变、旧名还被别的规则用着、新名撞上已有分类、新名目录已存在，
+/// 后三种都该问用户，不静默合并——怎么并只有他知道。`except_id` 是本次要改的那条规则自己。
+fn check_rule_rename(
+    conn: &Connection,
+    desktop: &Path,
+    old: &str,
+    new: &str,
+    except_id: i64,
+) -> AppResult<Option<(std::path::PathBuf, std::path::PathBuf)>> {
+    let (old, new) = (old.trim(), new.trim());
+    if old.is_empty() || new.is_empty() || old == new {
+        return Ok(None);
+    }
+    let still_used: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM desktop_rules WHERE category = ?1 AND id <> ?2",
+        params![old, except_id],
+        |r| r.get(0),
+    )?;
+    if still_used > 0 {
+        // 还有别的规则叫旧名：分类名和目录都不该跟着这一条走
+        return Ok(None);
+    }
+    let clash: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM categories WHERE type = 'app' AND name = ?1 COLLATE NOCASE",
+            params![new],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if clash.is_some() {
+        return Err(AppError::msg(format!("已经有分类「{new}」，先把它并掉再改规则名")));
+    }
+    let base = desktop.join(ORGANIZE_DIR);
+    let (cat_dir, dest_dir) = (base.join(old), base.join(new));
+    if cat_dir.is_dir() && dest_dir.exists() {
+        return Err(AppError::msg(format!(
+            "桌面整理\\{new} 已经存在，先把它换个名或清空再改"
+        )));
+    }
+    Ok(Some((cat_dir, dest_dir)))
+}
+
+/// 真正动手：改分类表的名字，重命名 `桌面整理\<旧名>`，并把记着旧路径的行改到新路径上。
+/// 单独调用也安全——它自己会先审一遍。
+pub fn propagate_rule_rename(
+    conn: &Connection,
+    desktop: &Path,
+    old: &str,
+    new: &str,
+    except_id: i64,
+) -> AppResult<()> {
+    let (cat_dir, dest_dir) = match check_rule_rename(conn, desktop, old, new, except_id)? {
+        Some(dirs) => dirs,
+        None => return Ok(()),
+    };
+    let moving_folder = cat_dir.is_dir();
+    if moving_folder {
+        std::fs::rename(&cat_dir, &dest_dir)?;
+    }
+    // 兜底：库没改成，目录也不该留在新名下
+    let rollback_folder = || {
+        if moving_folder {
+            let _ = std::fs::rename(&dest_dir, &cat_dir);
+        }
+    };
+    let from = cat_dir.to_string_lossy().to_string();
+    let to = dest_dir.to_string_lossy().to_string();
+
+    conn.execute_batch("BEGIN")?;
+    let wrote = (|| -> AppResult<()> {
+        // 分类名精确匹配：规则里存的就是 categories.name 的原文，大小写不同的两条分类本来就该分开
+        conn.execute(
+            "UPDATE categories SET name = ?1 WHERE type = 'app' AND name = ?2",
+            params![new.trim(), old.trim()],
+        )?;
+        for (table, column) in [
+            ("organize_logs", "to_path"),
+            ("apps", "target"),
+            ("files", "path"),
+            ("files", "managed_root"),
+        ] {
+            reprefix_paths(conn, table, column, &from, &to)?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = wrote {
+        let _ = conn.execute_batch("ROLLBACK");
+        rollback_folder();
+        return Err(e);
+    }
+    if let Err(e) = crate::db::commit(conn) {
+        rollback_folder();
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// 把某一列里以 `from` 开头的路径改写成以 `to` 开头。表名和列名都是调用处写死的字面量。
+/// 分类名可能带中文和 `_`（LIKE 的通配符），所以逐行取出来在 Rust 里比前缀；
+/// 截断按字符数而不是字节数，中文路径切一半会 panic。
+fn reprefix_paths(
+    conn: &Connection,
+    table: &'static str,
+    column: &'static str,
+    from: &str,
+    to: &str,
+) -> AppResult<usize> {
+    let lower_from = from.to_lowercase();
+    let keep = from.chars().count();
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id, {column} FROM {table} WHERE {column} IS NOT NULL"
+    ))?;
+    let rows: Vec<(i64, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .filter_map(Result::ok)
+        .collect();
+    drop(stmt);
+
+    let mut n = 0;
+    for (id, path) in rows {
+        if !path.to_lowercase().starts_with(&lower_from) {
+            continue;
+        }
+        let tail: String = path.chars().skip(keep).collect();
+        let next = format!("{to}{tail}");
+        conn.execute(
+            &format!("UPDATE {table} SET {column} = ?1 WHERE id = ?2"),
+            params![next, id],
+        )?;
+        n += 1;
+    }
+    Ok(n)
+}
+
 pub fn revert_organize(conn: &Connection, log_id: Option<i64>) -> AppResult<usize> {
     let logs: Vec<OrganizeLog> = match log_id {
         Some(id) => conn
@@ -739,6 +897,117 @@ mod tests {
         let mut blind = Vec::new();
         scan_directory(&s(&dir), 0, &rules, &icon_dir, None, &mut blind);
         assert_eq!(blind.len(), 2, "认不出自己时一项都不该被跳掉");
+    }
+
+    /// 造一套「已经整理过」的样子：`桌面整理\文档\报告.pdf` 摆在那儿，
+    /// 卡片、恢复日志、文件备注、规则四边都记着这个名字
+    fn organized_as_docs(desktop: &Path) -> (Connection, PathBuf) {
+        let c = conn();
+        let cat = desktop.join(ORGANIZE_DIR).join("文档");
+        std::fs::create_dir_all(&cat).unwrap();
+        let file = cat.join("报告.pdf");
+        std::fs::write(&file, b"x").unwrap();
+        let (to, root) = (s(&file), s(&cat));
+        c.execute("INSERT INTO categories (id, name, type) VALUES (1, '文档', 'app')", [])
+            .unwrap();
+        c.execute(
+            "INSERT INTO desktop_rules (id, category, extensions) VALUES (30, '文档', '.pdf')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO apps (id, name, target, category_id) VALUES (10, '报告.pdf', ?1, 1)",
+            params![to],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO organize_logs (id, file_name, from_path, to_path) VALUES (1, '报告.pdf', 'C:/Users/me/Desktop/报告.pdf', ?1)",
+            params![to],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO files (id, path, name, managed_root) VALUES (20, ?1, '报告.pdf', ?2)",
+            params![to, root],
+        )
+        .unwrap();
+        (c, cat)
+    }
+
+    fn scalar(c: &Connection, sql: &str) -> String {
+        c.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap()
+    }
+
+    #[test]
+    fn renaming_a_rule_category_moves_the_folder_and_every_row_that_remembers_it() {
+        let desktop = sandbox("rule-rename");
+        let (c, cat) = organized_as_docs(&desktop);
+        let mut renamed = rule("资料", None, Some(".pdf"), true);
+        renamed.id = 30;
+
+        save_rule_with_rename(&c, &renamed, &desktop).unwrap();
+
+        let new_file = desktop.join(ORGANIZE_DIR).join("资料").join("报告.pdf");
+        assert!(!cat.exists(), "旧目录该跟着改名，不该留个空壳");
+        assert!(new_file.exists(), "目录里的文件没跟着走");
+        let (to, root) = (s(&new_file), s(new_file.parent().unwrap()));
+        assert_eq!(scalar(&c, "SELECT name FROM categories WHERE id = 1"), "资料");
+        assert_eq!(scalar(&c, "SELECT category FROM desktop_rules WHERE id = 30"), "资料");
+        // 卡片双击要靠 target、恢复整理要靠 to_path、文件备注要靠 path：三条都得换到新路径
+        assert_eq!(scalar(&c, "SELECT target FROM apps WHERE id = 10"), to);
+        assert_eq!(scalar(&c, "SELECT to_path FROM organize_logs WHERE id = 1"), to);
+        assert_eq!(scalar(&c, "SELECT path FROM files WHERE id = 20"), to);
+        assert_eq!(scalar(&c, "SELECT managed_root FROM files WHERE id = 20"), root);
+    }
+
+    #[test]
+    fn a_rule_name_still_used_by_another_rule_leaves_the_folder_alone() {
+        let desktop = sandbox("rule-rename-shared");
+        let (c, cat) = organized_as_docs(&desktop);
+        c.execute(
+            "INSERT INTO desktop_rules (id, category, keywords) VALUES (31, '文档', '合同')",
+            [],
+        )
+        .unwrap();
+        let mut renamed = rule("资料", None, Some(".pdf"), true);
+        renamed.id = 30;
+
+        save_rule_with_rename(&c, &renamed, &desktop).unwrap();
+
+        // 31 号规则还叫「文档」，动分类名和目录等于替它改名
+        assert!(cat.exists());
+        assert_eq!(scalar(&c, "SELECT name FROM categories WHERE id = 1"), "文档");
+        assert_eq!(scalar(&c, "SELECT category FROM desktop_rules WHERE id = 30"), "资料");
+    }
+
+    #[test]
+    fn a_rule_rename_onto_an_existing_category_is_refused_before_anything_moves() {
+        let desktop = sandbox("rule-rename-clash");
+        let (c, cat) = organized_as_docs(&desktop);
+        c.execute("INSERT INTO categories (id, name, type) VALUES (40, '图片', 'app')", [])
+            .unwrap();
+        let mut renamed = rule("图片", None, Some(".pdf"), true);
+        renamed.id = 30;
+
+        let err = save_rule_with_rename(&c, &renamed, &desktop).unwrap_err().to_string();
+        assert!(err.contains("图片"), "{err}");
+        // 拒绝要拒在写之前：规则、分类、目录三者都还是原样
+        assert!(cat.exists());
+        assert_eq!(scalar(&c, "SELECT name FROM categories WHERE id = 1"), "文档");
+        assert_eq!(scalar(&c, "SELECT category FROM desktop_rules WHERE id = 30"), "文档");
+    }
+
+    #[test]
+    fn a_rule_rename_onto_an_existing_folder_is_refused() {
+        let desktop = sandbox("rule-rename-folder-taken");
+        let (c, cat) = organized_as_docs(&desktop);
+        std::fs::create_dir_all(desktop.join(ORGANIZE_DIR).join("资料")).unwrap();
+        let mut renamed = rule("资料", None, Some(".pdf"), true);
+        renamed.id = 30;
+
+        let err = save_rule_with_rename(&c, &renamed, &desktop).unwrap_err().to_string();
+        assert!(err.contains("已经存在"), "{err}");
+        assert!(cat.exists(), "目录被占了就不该动旧目录");
+        assert_eq!(scalar(&c, "SELECT category FROM desktop_rules WHERE id = 30"), "文档");
     }
 
     #[test]

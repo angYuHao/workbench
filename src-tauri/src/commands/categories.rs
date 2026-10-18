@@ -53,7 +53,11 @@ pub fn get_rules(state: State<AppState>) -> Result<Vec<DesktopRule>, String> {
 #[tauri::command]
 pub fn save_rule(state: State<AppState>, rule: DesktopRule) -> Result<DesktopRule, String> {
     let conn = state.conn();
-    crate::services::categories::save_rule(&conn, &rule).map_err(|e| e.to_string())
+    // 改了规则里的分类名就要连分类表、桌面整理目录、记着旧路径的行一起带走
+    let desktop = crate::win::desktop::user_desktop()
+        .ok_or_else(|| "无法获取桌面目录".to_string())?;
+    crate::services::desktop::save_rule_with_rename(&conn, &rule, std::path::Path::new(&desktop))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
