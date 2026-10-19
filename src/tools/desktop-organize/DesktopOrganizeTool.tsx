@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, ListFilter, Undo2, Wand2 } from "lucide-react";
 import { organizeDesktop, revertOrganize, scanDesktop } from "../../api/desktop";
-import { useDesktopStore } from "../../stores/desktop";
 import { useSettingsStore } from "../../stores/settings";
 import { Button, Checkbox, Modal, ModalConfirm, Select, Table, message } from "../../ui";
 import { stripExt } from "../../utils/fileKind";
@@ -24,7 +23,6 @@ const blankRule: DesktopRule = {
  * 卡片和分类在「应用」页，那儿只读开始菜单，不碰这里的规则。
  */
 export default function DesktopOrganizeTool({ onBack }: ToolProps) {
-  const { categories, loadCategories } = useDesktopStore();
   const { rules, loadRules } = useSettingsStore();
   const [plans, setPlans] = useState<DesktopItem[]>([]);
   const [organizeOpen, setOrganizeOpen] = useState(false);
@@ -36,11 +34,21 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
   const [reverting, setReverting] = useState(false);
 
   useEffect(() => {
-    loadCategories().catch((e) => message.error(String(e)));
     loadRules().catch((e) => message.error(String(e)));
   }, []);
 
-  const categoryNames = useMemo(() => categories.map((c) => c.name), [categories]);
+  const categoryNames = useMemo(() => {
+    // 整理桌面的目标分类就是分类规则里那些名字：这张表才决定文件挪去哪，
+    // 分类表里可能还有只在「应用」页用着的名字，摆在这儿是干扰
+    const names = [...new Set(rules.map((r) => r.category))];
+    return names;
+  }, [rules]);
+  /** 规则命中不到的一律落「其他」，那一行不在规则名里也得能显出来，不然下拉显示「请选择」、实际却会挪进「其他」 */
+  const optionsFor = (current: string) =>
+    (categoryNames.includes(current) ? categoryNames : [...categoryNames, current]).map((n) => ({
+      label: n,
+      value: n,
+    }));
   const newPlans = useMemo(() => (onlyNew ? plans.filter((p) => !p.registered) : plans), [plans, onlyNew]);
   const skippedPlans = plans.length - newPlans.length;
 
@@ -172,7 +180,7 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
                   size="small"
                   style={{ width: 130 }}
                   value={record.category}
-                  options={categoryNames.map((n) => ({ label: n, value: n }))}
+                  options={optionsFor(record.category)}
                   onChange={(v) =>
                     setPlans((prev) =>
                       prev.map((p) => (p.path === record.path ? { ...p, category: v as string } : p)),
@@ -252,7 +260,14 @@ function Action({
         </div>
       </div>
       {extra && <span className="label">{extra}</span>}
-      <Button type="primary" onClick={onClick} loading={loading} danger={danger} style={{ alignSelf: "flex-end" }}>
+      {/* 三张卡在网格里等高，按钮靠 margin-top:auto 顶到底：说明文字长短不一也不会错开 */}
+      <Button
+        type="primary"
+        onClick={onClick}
+        loading={loading}
+        danger={danger}
+        style={{ alignSelf: "flex-end", marginTop: "auto" }}
+      >
         {action}
       </Button>
     </div>
