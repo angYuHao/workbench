@@ -59,11 +59,22 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           shopt -s nullglob
-          files=(src-tauri/target/release/bundle/msi/*.msi src-tauri/target/release/bundle/nsis/*.exe)
-          test "${#files[@]}" -gt 0 || { echo "没找到安装包"; exit 1; }
+          built=(src-tauri/target/release/bundle/msi/*.msi src-tauri/target/release/bundle/nsis/*.exe)
+          test "${#built[@]}" -gt 0 || { echo "没找到安装包"; exit 1; }
+
+          # GitHub 会把资产名里的非 ASCII 字符抹掉：个人工作台_1.0.1_x64-setup.exe 传上去变成
+          # _1.0.1_x64-setup.exe，跟正文里的文件名对不上，照着核对的人会以为哈希错了。
+          # 所以上传前先把开头的产品名换成 workbench，校验表也算这份改过名的文件。
+          mkdir -p upload
+          files=()
+          for f in "${built[@]}"; do
+            base=$(basename "$f")
+            to="upload/workbench_${base#*_}"
+            cp "$f" "$to"
+            files+=("$to")
+          done
           ls -l "${files[@]}"
 
-          # 校验和现场算：写死等于把本次构建没产出的东西也说成产出了
           {
             echo "Windows x64 安装包。需要 Microsoft Edge WebView2 运行时（Win10 1803+ / Win11 自带）。"
             echo
@@ -71,6 +82,9 @@ jobs:
             echo '- 文件名带 .msi 的是 Windows Installer 包，msiexec /i 包名.msi /qn 可无人值守部署'
             echo
             echo '数据和设置都在 %APPDATA%\workbench\ 下，卸载程序不会替你删它。'
+            echo
+            echo '应用名是中文的「个人工作台」，但安装包文件名用 ASCII：GitHub 会删掉资产名里的非 ASCII 字符，'
+            echo '中文名传上去只会剩个下划线开头。双击安装出来的程序名、开始菜单项都还是中文，不受影响。'
             echo
             echo "## SHA-256"
             echo
@@ -84,6 +98,14 @@ jobs:
           } > release-notes.md
           cat release-notes.md
 
-          # 同一个 tag 重跑时 Release 已存在：覆盖资产并改说明，不报错
-          gh release create "$TAG" --title "$TAG" --notes-file release-notes.md "${files[@]}" \
-            || { gh release upload "$TAG" --clobber "${files[@]}"; gh release edit "$TAG" --notes-file release-notes.md; }
+          # 重跑同一个 tag 时 Release 已存在：create 失败不算错，后面覆盖资产、改说明
+          gh release create "$TAG" --title "$TAG" --notes-file release-notes.md || true
+          # 清掉早先传上去的中文名资产（改名规则之前的产物），免得一次重跑留两份
+          for old in $(gh release view "$TAG" --json assets -q '.assets[].name'); do
+            case "$old" in
+              workbench_*) ;;
+              *) gh release delete-asset "$TAG" "$old" --yes ;;
+            esac
+          done
+          gh release upload "$TAG" --clobber "${files[@]}"
+          gh release edit "$TAG" --notes-file release-notes.md
