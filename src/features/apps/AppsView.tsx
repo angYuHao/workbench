@@ -11,7 +11,7 @@ import SelectionBar from "../../shared/SelectionBar";
 import SmartCategorizeModal from "../../shared/SmartCategorizeModal";
 import { useIdSelection } from "../../shared/useIdSelection";
 import { useSmartCategorize } from "../../shared/useSmartCategorize";
-import { Button, Checkbox, Form, FormItem, Input, Modal, ModalConfirm, Select, Space, Tooltip, message, useForm } from "../../ui";
+import { Button, Checkbox, Form, FormItem, Input, Modal, ModalConfirm, Select, Space, message, useForm } from "../../ui";
 import { stripExt } from "../../utils/fileKind";
 import type { AppEntry } from "../../types";
 
@@ -284,32 +284,32 @@ export default function AppsView() {
             onDeleteMany={deleteCats}
             onDelete={deleteCat}
           />
-          {/* 落点钉在这一栏最底下：分类多到要滚动时也留在视线里，图标大到能手能落在上面 */}
+          {/* 落点钉在这一栏最底下：分类多到要滚动时也留在视线里，图标大到能手能落在上面。
+              提示用原生 title 不用 Tooltip —— 浮层绝对定位会撑大这一栏的横向滚动区，一悬停就出滚动条 */}
           <div className="apps-filter-slot">
-            <Tooltip title="把一张卡片拖到这里：名字进过滤名单，卡片当场消失，以后同步不再收它。名单在 设置 → 应用过滤 里能改能删，那里还能试算挡了谁。" placement="right">
-              <div
-                className={filterOver ? "filter-drop on" : "filter-drop"}
-                aria-label="拖到此处过滤"
-                onDragOver={(e) => {
-                  if (!carriesItem(e)) return;
-                  e.preventDefault();
-                  // 卡片那边 effectAllowed 写的是 move，这里必须也用 move：
-                  // 两个不一致时 Chrome 直接把这次拖动判成 none，drop 根本不会发出来
-                  e.dataTransfer.dropEffect = "move";
-                  if (!filterOver) setFilterOver(true);
-                }}
-                onDragLeave={() => setFilterOver(false)}
-                onDrop={(e) => {
-                  if (!carriesItem(e)) return;
-                  e.preventDefault();
-                  setFilterOver(false);
-                  const id = Number(e.dataTransfer.getData(ITEM_MIME));
-                  if (Number.isInteger(id) && id > 0) void dropToFilter(id);
-                }}
-              >
-                <Filter size={22} strokeWidth={1.6} />
-              </div>
-            </Tooltip>
+            <div
+              className={filterOver ? "filter-drop on" : "filter-drop"}
+              aria-label="拖到此处过滤"
+              title="把卡片拖到这里：加入过滤名单，同时移除这张卡片（名单在 设置 → 应用过滤 里能改能删）"
+              onDragOver={(e) => {
+                if (!carriesItem(e)) return;
+                e.preventDefault();
+                // 卡片那边 effectAllowed 写的是 move，这里必须也用 move：
+                // 两个不一致时 Chrome 直接把这次拖动判成 none，drop 根本不会发出来
+                e.dataTransfer.dropEffect = "move";
+                if (!filterOver) setFilterOver(true);
+              }}
+              onDragLeave={() => setFilterOver(false)}
+              onDrop={(e) => {
+                if (!carriesItem(e)) return;
+                e.preventDefault();
+                setFilterOver(false);
+                const id = Number(e.dataTransfer.getData(ITEM_MIME));
+                if (Number.isInteger(id) && id > 0) void dropToFilter(id);
+              }}
+            >
+              <Filter size={22} strokeWidth={1.6} />
+            </div>
           </div>
         </div>
         <div className="content-pane">
