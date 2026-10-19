@@ -53,7 +53,8 @@ pub fn installed(app: &AppHandle) -> bool {
     app.tray_by_id(TRAY_ID).is_some()
 }
 
-fn reveal(app: &AppHandle) {
+/// 把主窗口叫到眼前：托盘菜单和唤醒热键共用这一个入口
+pub fn reveal(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
         let _ = w.show();

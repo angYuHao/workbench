@@ -2,15 +2,18 @@ import { useEffect } from "react";
 import { RouterProvider } from "react-router-dom";
 import { router } from "./app/router";
 import { useSettingsStore } from "./stores/settings";
-import { MessageContainer, ConfirmContainer } from "./ui";
+import { MessageContainer, ConfirmContainer, message } from "./ui";
 
 export default function App() {
   const theme = useSettingsStore((s) => s.theme);
   const loadLocalPrefs = useSettingsStore((s) => s.loadLocalPrefs);
+  const loadWakeHotkey = useSettingsStore((s) => s.loadWakeHotkey);
 
   useEffect(() => {
     loadLocalPrefs();
-  }, [loadLocalPrefs]);
+    // 热键装载失败要说出来：默认键被占的话，用户以为有热键其实没有，比没提示更糟
+    loadWakeHotkey().catch((e) => message.error(String(e)));
+  }, [loadLocalPrefs, loadWakeHotkey]);
 
   useEffect(() => {
     document.body.classList.toggle("dark", theme === "dark");

@@ -5,7 +5,14 @@ import {
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
 import * as api from "../api/categories";
-import { getSettings, setCloseToTray, setSetting } from "../api/settings";
+import {
+  clearWakeHotkey,
+  getSettings,
+  loadWakeHotkey,
+  setCloseToTray,
+  setSetting,
+  setWakeHotkey,
+} from "../api/settings";
 import { useDesktopStore } from "./desktop";
 import type { DesktopRule } from "../types";
 
@@ -16,6 +23,8 @@ interface SettingsStore {
   autostart: boolean;
   theme: Theme;
   closeToTray: boolean;
+  /** 生效中的唤醒热键；空串 = 没有（没设过、或被占用后清掉了） */
+  wakeHotkey: string;
   loadRules: () => Promise<void>;
   saveRule: (rule: DesktopRule) => Promise<void>;
   removeRule: (id: number) => Promise<void>;
@@ -24,13 +33,17 @@ interface SettingsStore {
   loadLocalPrefs: () => Promise<void>;
   toggleTheme: () => Promise<void>;
   toggleCloseToTray: (on: boolean) => Promise<void>;
+  loadWakeHotkey: () => Promise<void>;
+  bindWakeHotkey: (key: string) => Promise<void>;
+  dropWakeHotkey: () => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   rules: [],
   autostart: false,
   theme: "light",
-  closeToTray: false,
+  closeToTray: true,
+  wakeHotkey: "",
   loadRules: async () => set({ rules: await api.getRules() }),
   saveRule: async (rule) => {
     await api.saveRule(rule);
@@ -53,8 +66,16 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const settings = await getSettings();
     set({
       theme: settings.theme === "dark" ? "dark" : "light",
-      closeToTray: settings.close_to_tray === "1",
+      // 没存过就算开：唤醒热键要靠窗口能隐藏，默认关着的话热键没意义
+      closeToTray: settings.close_to_tray !== "0",
     });
+  },
+  /** 装载设置里存的热键（没存过后端用默认键）。失败会抛，让调用方决定怎么提示 */
+  loadWakeHotkey: async () => set({ wakeHotkey: await loadWakeHotkey() }),
+  bindWakeHotkey: async (key) => set({ wakeHotkey: await setWakeHotkey(key) }),
+  dropWakeHotkey: async () => {
+    await clearWakeHotkey();
+    set({ wakeHotkey: "" });
   },
   toggleTheme: async () => {
     const nextTheme: Theme = get().theme === "dark" ? "light" : "dark";

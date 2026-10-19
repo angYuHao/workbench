@@ -12,6 +12,17 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // 唤醒热键只在这儿挂一个回调，真正的注册由前端在启动后调 async 命令做：
+        // 同步命令跑在主线程，插件内部要回主线程，两边一撞就死锁
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        tray::reveal(app);
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -46,12 +57,17 @@ pub fn run() {
             // 所以不需要定时器：一直开着不写的时候它本来也不会涨。
             services::ai::log::cleanup();
 
-            let on = services::settings::get_setting(&app.state::<db::AppState>().conn(), "close_to_tray")
-                .ok()
-                .flatten()
-                .as_deref()
-                == Some("1");
-            if on {
+            // 托盘默认开：没存过这个键就算开，只有用户明确关掉才存 "0"。
+            // 唤醒热键要靠它才有意义——不然窗口一关是真退出，热键没人接。
+            let tray_off = services::settings::get_setting(
+                &app.state::<db::AppState>().conn(),
+                "close_to_tray",
+            )
+            .ok()
+            .flatten()
+            .as_deref()
+                == Some("0");
+            if !tray_off {
                 tray::install(app.handle())?;
             }
 
@@ -108,6 +124,9 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::set_setting,
             commands::settings::set_close_to_tray,
+            commands::settings::load_wake_hotkey,
+            commands::settings::set_wake_hotkey,
+            commands::settings::clear_wake_hotkey,
             commands::settings::export_db,
             commands::settings::restore_db,
             commands::categorize::smart_categorize,

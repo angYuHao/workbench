@@ -13,6 +13,19 @@ export function setCloseToTray(on: boolean) {
   return invoke<void>("set_close_to_tray", { on });
 }
 
+/** 唤醒热键：注册和解绑都在后端做（同步命令会死锁，所以这三个都是 async 命令） */
+export function loadWakeHotkey() {
+  return invoke<string>("load_wake_hotkey");
+}
+
+export function setWakeHotkey(key: string) {
+  return invoke<string>("set_wake_hotkey", { key });
+}
+
+export function clearWakeHotkey() {
+  return invoke<void>("clear_wake_hotkey");
+}
+
 export function exportDb(dest: string) {
   return invoke<void>("export_db", { dest });
 }

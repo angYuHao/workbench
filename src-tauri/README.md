@@ -10,7 +10,7 @@
 2. `src/lib.rs` 的 `tauri::generate_handler![...]` 登记一条
 3. 前端 `src/api/<域>.ts` 里 `invoke("命令名", { ... })`
 
-**漏第 2 步编译不报错**，运行时才「command not found」。当前基线：`#[tauri::command]` 定义数 == 注册数 == 64，前端 `invoke` 的字符串全部落在这个集合里。改完命令层就重新数一遍这三个数：
+**漏第 2 步编译不报错**，运行时才「command not found」。当前基线：`#[tauri::command]` 定义数 == 注册数 == 67（2026-10-18 加唤醒热键的三条命令之后），前端 `invoke` 的字符串全部落在这个集合里。改完命令层就重新数一遍这两个数：
 
 ```bash
 grep -rc '#\[tauri::command\]' src/commands/*.rs   # 求和
