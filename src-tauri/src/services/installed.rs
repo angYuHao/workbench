@@ -24,7 +24,7 @@ struct Discovered {
 
 /// 扫一遍开始菜单，把没见过的应用收进启动器。只插不改：
 /// 用户改过的名字、手动归好的分类、抽好的图标都不该被一次同步抹掉。
-/// 他删掉的卡片记在 `dismissed_apps` 里，也不再收回来。
+/// 删掉的卡片下次同步会再收回来——这一页就是「本机装了什么」的镜子，不做拉黑。
 pub fn sync_installed(conn: &Connection) -> AppResult<usize> {
     let icon_dir = get_icon_dir()?;
     let roots = crate::win::desktop::all_program_menus()
@@ -53,13 +53,6 @@ pub(crate) fn sync_from_roots(
         .filter_map(Result::ok)
         .map(|t| path_key(&t))
         .collect();
-    // 被他删掉的卡片不再收回来：记的是卡片那行的 target，两种写法都拦
-    let dismissed: HashSet<String> = conn
-        .prepare("SELECT target FROM dismissed_apps")?
-        .query_map([], |r| r.get::<_, String>(0))?
-        .filter_map(Result::ok)
-        .map(|t| path_key(&t))
-        .collect();
 
     let _ = std::fs::create_dir_all(icon_dir);
     let mut inserted = 0;
@@ -67,9 +60,6 @@ pub(crate) fn sync_from_roots(
         let lnk = path_key(&item.lnk);
         let target = path_key(&item.target);
         if known.contains(&lnk) || known.contains(&target) {
-            continue;
-        }
-        if dismissed.contains(&lnk) || dismissed.contains(&target) {
             continue;
         }
         let icon = extract_icon(icon_dir, &[item.lnk.as_str(), item.target.as_str()]);
@@ -282,10 +272,10 @@ mod tests {
         assert!(targets(&c).contains(&"Loomy|startmenu".to_string()));
     }
 
-    /// 删掉的卡片不该被下一次同步收回来：delete_app 会把路径记进 dismissed_apps
+    /// 删掉的卡片下次同步照样收回来：这一页是「本机装了什么」的镜子，不做拉黑名单
     #[test]
-    fn a_deleted_card_is_not_collected_again() {
-        let root = sandbox("dismissed");
+    fn a_deleted_card_comes_back_on_the_next_sync() {
+        let root = sandbox("resync");
         let programs = root.join("Programs");
         fake_lnk(&programs, "Game Launcher.lnk");
         let roots = [programs];
@@ -299,8 +289,8 @@ mod tests {
 
         assert_eq!(
             sync_from_roots(&c, &roots, &icons).unwrap(),
-            0,
-            "删掉的卡片又被收回来了"
+            1,
+            "重新同步该把它收回来"
         );
     }
 

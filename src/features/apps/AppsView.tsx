@@ -57,13 +57,18 @@ export default function AppsView() {
     onApplied: reloadAll,
   });
 
-  /** 只往库里添新面孔：改过名、归好类的卡片不会被一次同步抹掉 */
-  const sync = async () => {
+  /**
+   * 只往库里添新面孔：改过名、归好类的卡片不会被一次同步抹掉。
+   * 自动那次（进页面）只在真有新东西时吭声，手动点的必须有回话，不然看着像没反应。
+   */
+  const sync = async (manual: boolean) => {
     setSyncing(true);
     try {
       const n = await syncInstalledApps();
       await loadApps();
+      const total = useDesktopStore.getState().apps.length;
       if (n > 0) message.success(`从开始菜单新收录 ${n} 个程序`);
+      else if (manual) message.info(`开始菜单里没有新程序，当前 ${total} 个`);
     } catch (e) {
       message.error(String(e));
     } finally {
@@ -73,7 +78,7 @@ export default function AppsView() {
 
   useEffect(() => {
     // 拉不到要说出来：不然页面一片空白，看着像「没数据」而不是「出错了」
-    void sync();
+    void sync(false);
     loadCategories().catch((e) => message.error(String(e)));
   }, []);
 
@@ -184,7 +189,7 @@ export default function AppsView() {
     if (ids.length === 0) return;
     ModalConfirm({
       title: `确认删除选中的 ${ids.length} 个程序？`,
-      content: "仅从启动器移除，不会卸载本机软件。下次同步也不会再把它收回来。",
+      content: "只从这一页移除，不卸载软件；下次同步（重进这页或点「重新同步」）会再把它收回来。",
       onOk: async () => {
         for (const id of ids) await removeApp(id);
         message.success(`已删除 ${ids.length} 个程序`);
@@ -214,7 +219,7 @@ export default function AppsView() {
           />
         ) : (
           <Space>
-            <Button icon={<RefreshCw size={16} />} loading={syncing} onClick={sync}>
+            <Button icon={<RefreshCw size={16} />} loading={syncing} onClick={() => void sync(true)}>
               重新同步
             </Button>
             <Button icon={<Plus size={16} />} onClick={() => setAddOpen(true)}>

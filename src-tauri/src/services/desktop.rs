@@ -582,16 +582,6 @@ pub fn save_app(conn: &Connection, app: &AppEntry) -> AppResult<AppEntry> {
 }
 
 pub fn delete_app(conn: &Connection, id: i64) -> AppResult<()> {
-    // 卡片是删了，可程序还在开始菜单里：不把这条路径记下来，下次同步又把它收回来，等于删了个寂寞
-    let target: Option<String> = conn
-        .query_row("SELECT target FROM apps WHERE id = ?1", params![id], |r| r.get(0))
-        .optional()?;
-    if let Some(target) = target {
-        conn.execute(
-            "INSERT OR REPLACE INTO dismissed_apps (target) VALUES (?1)",
-            params![target],
-        )?;
-    }
     conn.execute("DELETE FROM apps WHERE id = ?1", params![id])?;
     crate::services::usage::forget(conn, crate::services::usage::APP, id)
 }

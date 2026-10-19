@@ -22,13 +22,6 @@ CREATE TABLE IF NOT EXISTS apps (
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- 「应用」页里被他删掉的程序：开始菜单同步时按 target 认出来，不再收回来
--- 只在用户点删除时记；撤销整理那种内部删行不算
-CREATE TABLE IF NOT EXISTS dismissed_apps (
-  target       TEXT PRIMARY KEY COLLATE NOCASE,
-  dismissed_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
 -- 网址收藏
 CREATE TABLE IF NOT EXISTS bookmarks (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
