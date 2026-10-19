@@ -26,6 +26,7 @@ utils/                真·通用：clipboard、error、fileKind、textFile
 - `api/<域>.ts` 的文件名对齐后端 `commands/<域>.rs`；**不要在组件里直接 `invoke`**，一律走 `api/`。
 - `types/` 的对面是 `src-tauri/src/models/`：字段名和可空性两边必须一致（后端 `rename_all = "camelCase"`）。少一个字段就是运行时 `undefined`，所以不要用「标成可选」去迁就后端缺字段。
 - 组件库只用 `ui/` 里自研的那套，不引第三方 UI 库；样式改 `styles/global.css`，颜色一律走 `var(--color-*)`，别写死色值（否则深色模式漏网）。
+- **`Tooltip` 别放进 `overflow:auto` 的容器里**：浮层是绝对定位 + `white-space:nowrap`，会把那一栏的横向滚动区撑大，一悬停就出滚动条（分类栏底下那个过滤落点就是这样，改用原生 `title` 了）。侧栏那种不滚动的容器里用它没事。
 - **打开一律双击**，单击只留给「选择」模式里的勾选。以后新增任何列表或网格都按这个口径来。
 - **键盘那一半不能省**：只要不是原生 `<button>` 又要能按，就 spread `ui/pressable(onActivate)`（Enter/空格 + `tabIndex` + role），焦点圈由 `styles/layout.css` 顶部的 `:focus-visible` 统一画。双击打开的卡片，Enter 就等于那一下双击。分类树的建树/新建/改名/拖拽归类走 `shared/useCategoryScaffold`，删除流程两边不一样，留在各自视图里。
 
