@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { AiModel, DesktopRule } from "../../types";
+import type { AiModel } from "../../types";
 
 /** 表单里就地显示的一句结果/错误，ok 决定它是绿是红 */
 export interface Hint {
@@ -43,13 +43,4 @@ export const blankModel: AiModel = {
   sort: 0,
   remoteModels: [],
   remoteAt: null,
-};
-
-export const emptyRule: DesktopRule = {
-  id: 0,
-  category: "",
-  keywords: null,
-  extensions: null,
-  enabled: true,
-  sort: 0,
 };

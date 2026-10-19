@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Ban, Bot, DatabaseBackup, ListFilter, Rocket, Search } from "lucide-react";
+import { Ban, Bot, DatabaseBackup, Rocket, Search } from "lucide-react";
 import { useSettingsStore } from "../../stores/settings";
 import { deleteAiModel, getAiModels, probeAiModel, openAiLog, readAiLog } from "../../api/aiModels";
 import { clearAiMemory, getAiMemory } from "../../api/smart";
@@ -15,21 +15,11 @@ import BlacklistSection from "./BlacklistSection";
 import DataSection from "./DataSection";
 import ModelEditModal from "./ModelEditModal";
 import ModelsSection from "./ModelsSection";
-import RuleEditModal from "./RuleEditModal";
-import RulesSection from "./RulesSection";
 import StartupSection from "./StartupSection";
-import { blankModel, emptyRule } from "./shared";
-import type { AiLogView, AiMemory, AiModel, BlacklistEntry, DesktopRule } from "../../types";
+import { blankModel } from "./shared";
+import type { AiLogView, AiMemory, AiModel, BlacklistEntry } from "../../types";
 
 const SECTIONS = [
-  {
-    key: "rules",
-    group: "桌面",
-    label: "分类规则",
-    desc: "桌面文件按关键词或扩展名自动归到某个分类",
-    icon: ListFilter,
-    words: "规则 关键词 扩展名 自动归类",
-  },
   {
     key: "models",
     group: "模型",
@@ -73,14 +63,13 @@ type SectionKey = (typeof SECTIONS)[number]["key"];
  * （模型、本机记忆、网页缓存、黑名单）。分组内部的表单和临时状态都在各自文件里。
  */
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { loadRules, loadAutostart, loadLocalPrefs } = useSettingsStore();
-  const [tab, setTab] = useState<SectionKey>("rules");
+  const { loadAutostart, loadLocalPrefs } = useSettingsStore();
+  const [tab, setTab] = useState<SectionKey>("models");
   const [keyword, setKeyword] = useState("");
   const [memory, setMemory] = useState<AiMemory[]>([]);
   const [pageCache, setPageCache] = useState(0);
   const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
   const [blockDraft, setBlockDraft] = useState("");
-  const [edit, setEdit] = useState<DesktopRule | null>(null);
   const [models, setModels] = useState<AiModel[]>([]);
   const [aiLog, setAiLog] = useState<AiLogView | null>(null);
   const [modelEdit, setModelEdit] = useState<AiModel | null>(null);
@@ -88,7 +77,6 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
 
   useEffect(() => {
     if (!open) return;
-    loadRules();
     loadAutostart();
     loadLocalPrefs();
     setKeyword("");
@@ -245,12 +233,6 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                 <h3 className="settings-h">{active.label}</h3>
                 <p className="settings-sub">{active.desc}</p>
 
-                {active.key === "rules" && (
-                  <RulesSection
-                    onAdd={() => setEdit(emptyRule)}
-                    onEdit={(rule) => setEdit(rule)}
-                  />
-                )}
                 {active.key === "models" && (
                   <ModelsSection
                     models={models}
@@ -286,7 +268,6 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
         </div>
       </Modal>
 
-      {edit && <RuleEditModal rule={edit} onClose={() => setEdit(null)} />}
       {modelEdit && <ModelEditModal model={modelEdit} onClose={() => setModelEdit(null)} onModelsChanged={refreshModels} />}
     </>
   );

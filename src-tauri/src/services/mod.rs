@@ -4,6 +4,7 @@ pub mod bookmarks;
 pub mod categories;
 pub mod desktop;
 pub mod files;
+pub mod installed;
 pub mod settings;
 pub mod totp;
 pub mod totp_backup;

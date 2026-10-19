@@ -3,10 +3,12 @@
 //! 手写 HTTP 客户端和 JSON 容错解析也一并退役（`.removed-winhttp/`）——
 //! 传输、错误归一化交给 rig，提示词和落库前的确认归我们。
 //!
-//! 四步顺序是定死的，别调：分类规则 → 本机记忆 → 模型 → 联网查。
-//! 前两步不花钱也不出网，后两步才花钱、才出网。
+//! 三步顺序是定死的，别调：本机记忆 → 模型 → 联网查。
+//! 第一步不花钱也不出网，后两步才花钱、才出网。
+//! 分类规则不管这儿：那条只决定桌面上文件挪去哪个文件夹，
+//! 「应用」页分的是装在本机的程序，两边各判各的。
 //!
-//! - [`preset`]   规则和本机记忆：不花钱的判断先做完
+//! - [`preset`]   本机记忆：不花钱的判断先做完
 //! - [`prompt`]   提示词：什么能出去、什么不能出去
 //! - [`client`]   额度、一发请求、调用日志
 //! - [`parse`]    回复容错解析
@@ -14,7 +16,7 @@
 //! - [`run`]      整条流水线的两半：`prepare` 在本机判完，`execute` 才出网
 //! - [`apply`]    落库：缺失的分类先建、条目改分类，顺手记进本机记忆
 //!
-//! 本文件只留一步的编排：`classify` 把上面几个串起来，`merge` 负责拦下模型越权用的规则分类名。
+//! 本文件只留一步的编排：`classify` 把上面几个串起来。
 
 use crate::error::AppResult;
 use crate::models::{SmartCategorizeItem, SmartCategorizeResult};
@@ -24,7 +26,7 @@ pub(crate) use apply::apply;
 pub(crate) use client::{chat, head};
 pub(crate) use lookup::fill_by_search;
 pub(crate) use parse::parse_json_array;
-pub(crate) use preset::{by_memory, by_rules, stem};
+pub(crate) use preset::{by_memory, stem};
 pub(crate) use prompt::names_for_model;
 pub(crate) use run::{execute, prepare};
 
@@ -47,14 +49,13 @@ pub async fn classify(
     target: &ChatTarget,
     items: &[SmartCategorizeItem],
     category_names: &[String],
-    reserved: &[String],
 ) -> AppResult<Vec<SmartCategorizeResult>> {
     if items.is_empty() {
         return Ok(Vec::new());
     }
     let prompt = user_prompt(items, category_names);
-    let rows = ask_model(target, &system_prompt(reserved), &prompt, &format!("AI分类 {}条", items.len()), items.len()).await?;
-    Ok(merge(items, &rows, reserved))
+    let rows = ask_model(target, &system_prompt(), &prompt, &format!("AI分类 {}条", items.len()), items.len()).await?;
+    Ok(merge(items, &rows))
 }
 
 pub(crate) async fn ask_model(
@@ -80,35 +81,19 @@ pub(crate) fn blank(item: &SmartCategorizeItem, reason: &str) -> SmartCategorize
     }
 }
 
-pub(crate) fn same(a: &str, b: &str) -> bool {
-    a.trim().eq_ignore_ascii_case(b.trim())
-}
-
-pub(crate) fn merge(items: &[SmartCategorizeItem], rows: &[One], reserved: &[String]) -> Vec<SmartCategorizeResult> {
+/// 模型答的条目按 id 对回进来的顺序；对不上号的（漏答、空分类）留一条要人工选的空白行
+pub(crate) fn merge(items: &[SmartCategorizeItem], rows: &[One]) -> Vec<SmartCategorizeResult> {
     items
         .iter()
-        .map(|item| {
-            let blank = |reason: String| SmartCategorizeResult {
+        .map(|item| match rows.iter().find(|row| row.id == item.id) {
+            Some(row) if !row.category.trim().is_empty() => SmartCategorizeResult {
                 id: item.id,
                 name: item.name.clone(),
-                suggested_category: String::new(),
-                reason,
-            };
-            match rows.iter().find(|row| row.id == item.id) {
-                // 提示词里禁过一遍，这里还得拦：对模型说话只是劝说，这一步才是保证
-                Some(row) if reserved.iter().any(|r| same(r, &row.category)) => blank(format!(
-                    "模型给的「{}」归本地规则管，已拦下",
-                    row.category.trim()
-                )),
-                Some(row) if !row.category.trim().is_empty() => SmartCategorizeResult {
-                    id: item.id,
-                    name: item.name.clone(),
-                    suggested_category: row.category.trim().to_string(),
-                    reason: row.reason.clone(),
-                },
-                Some(_) => blank("模型给了空分类，请手动选".to_string()),
-                None => blank("模型没给这条，请手动选".to_string()),
-            }
+                suggested_category: row.category.trim().to_string(),
+                reason: row.reason.clone(),
+            },
+            Some(_) => blank(item, "模型给了空分类，请手动选"),
+            None => blank(item, "模型没给这条，请手动选"),
         })
         .collect()
 }

@@ -1,4 +1,4 @@
-//! 四步编排拆成两半：[`prepare`] 只在库里做完不花钱的判断，[`execute`] 才碰网络。
+//! 三步编排拆成两半：[`prepare`] 只在库里做完不花钱的判断，[`execute`] 才碰网络。
 //! 这么切是为了让「锁不跨 `.await`」这条能从结构上看出来——命令层取锁、调 prepare、放锁，
 //! 然后才 await；早先整段编排写在命令层里，一不留神就是把 MutexGuard 带进了等待里。
 
@@ -11,22 +11,20 @@ use crate::models::{SmartCategorizeItem, SmartCategorizeResult};
 use crate::services::ai::models::ChatTarget;
 use crate::services::{ai::models, categories};
 
-use super::{by_memory, by_rules, classify, fill_by_search, names_for_model};
+use super::{by_memory, classify, fill_by_search, names_for_model};
 
-/// 不花钱的那两步跑完了，剩下要不要花钱问模型、问的时候能用哪些分类名
+/// 本机记忆跑完了，剩下要不要花钱问模型、问的时候能用哪些分类名
 pub struct RunPlan {
     /// 一条都没剩下时是 None：连模型配置都不取，也就不会因为「没配模型」报错
     target: Option<ChatTarget>,
     allowed: Vec<String>,
-    reserved: Vec<String>,
-    ruled: Vec<SmartCategorizeResult>,
     remembered: Vec<SmartCategorizeResult>,
     rest: Vec<SmartCategorizeItem>,
-    /// 只有桌面程序值得联网搜：书签的标题本来就是网页自己的名字
+    /// 只有本机程序值得联网搜：书签的标题本来就是网页自己的名字
     searchable: bool,
 }
 
-/// 分类规则 → 本机记忆。两步都不花钱也不出网，规则命中的条目连文件名都不出本机。
+/// 只有本机记忆这一步是不花钱的，它拦下来的条目连名字都不用出本机。
 pub fn prepare(
     conn: &Connection,
     items: &[SmartCategorizeItem],
@@ -37,33 +35,21 @@ pub fn prepare(
         .into_iter()
         .map(|c| c.name)
         .collect::<Vec<_>>();
-    // 分类规则只管桌面程序；别拿扩展名规则去套网址
-    let rules = if item_type == "app" {
-        categories::get_rules(conn)?
-    } else {
-        Vec::new()
-    };
-    let (ruled, miss) = by_rules(items, &rules);
-    // 记忆也只对桌面程序生效：判错一次记一次反而更乱
+    // 记忆只给本机程序记：书签判错一次记一次反而更乱
     let (remembered, rest) = if item_type == "app" {
-        by_memory(conn, &miss)
+        by_memory(conn, items)
     } else {
-        (Vec::new(), miss)
+        (Vec::new(), items.to_vec())
     };
-    let mut reserved: Vec<String> = rules.into_iter().map(|r| r.category).collect();
-    reserved.sort();
-    reserved.dedup();
     let target = if rest.is_empty() {
         None
     } else {
         Some(models::target_for(conn, model_id)?)
     };
     Ok(RunPlan {
-        // 报给模型的候选名单：桌面给（排掉规则占用的），书签一律不给
-        allowed: names_for_model(item_type, &names, &reserved),
+        // 报给模型的候选名单：程序给现有分类，书签一律不给
+        allowed: names_for_model(item_type, &names),
         target,
-        reserved,
-        ruled,
         remembered,
         rest,
         searchable: item_type == "app",
@@ -75,13 +61,12 @@ pub async fn execute(
     plan: RunPlan,
     items: &[SmartCategorizeItem],
 ) -> AppResult<Vec<SmartCategorizeResult>> {
-    let mut rows = plan.ruled;
-    rows.extend(plan.remembered);
+    let mut rows = plan.remembered;
     if let Some(target) = &plan.target {
-        let judged = classify(target, &plan.rest, &plan.allowed, &plan.reserved).await?;
+        let judged = classify(target, &plan.rest, &plan.allowed).await?;
         rows.extend(judged.clone());
 
-        // 模型留空的（判不出、或给了规则占用的分类被拦下）才值得联网搜
+        // 模型留空的（判不出、或给了空分类）才值得联网搜
         if plan.searchable {
             let blanks: Vec<SmartCategorizeItem> = plan
                 .rest
@@ -96,7 +81,7 @@ pub async fn execute(
                 .cloned()
                 .collect();
             if !blanks.is_empty() {
-                rows.extend(fill_by_search(target, &blanks, &plan.allowed, &plan.reserved).await);
+                rows.extend(fill_by_search(target, &blanks, &plan.allowed).await);
             }
         }
     }
@@ -139,19 +124,19 @@ mod tests {
         .unwrap();
     }
 
-    /// 规则判得掉的条目根本不该走到模型那儿——库里一条模型配置都没有也不报错
+    /// 本机记忆判得掉的条目根本不该走到模型那儿——库里一条模型配置都没有也不报错
     #[test]
-    fn rules_alone_need_no_model_at_all() {
+    fn memory_alone_need_no_model_at_all() {
         let c = conn();
-        add_category(&c, "文档", "app");
+        add_category(&c, "开发工具", "app");
         c.execute(
-            "INSERT INTO desktop_rules (category, extensions) VALUES ('文档', '.pdf')",
+            "INSERT INTO ai_memory (name, category, evidence, source, at) VALUES ('Loomy', '开发工具', '录屏', '搜索', 1)",
             [],
         )
         .unwrap();
 
-        let plan = prepare(&c, &[item(1, "报告.pdf", None)], "app", None).unwrap();
-        assert_eq!(plan.ruled.len(), 1, "规则该直接判定");
+        let plan = prepare(&c, &[item(1, "Loomy.lnk", None)], "app", None).unwrap();
+        assert_eq!(plan.remembered.len(), 1, "记忆该直接判定");
         assert!(plan.rest.is_empty());
         assert!(plan.target.is_none(), "没剩下的就不该去取模型配置");
     }
@@ -184,31 +169,49 @@ mod tests {
         assert!(plan.target.is_some(), "有剩下的就得取模型配置");
     }
 
-    /// 规则占用的分类名不报给模型：那是分类规则的活，模型不许越权用
     #[test]
-    fn reserved_category_names_are_hidden_from_the_model() {
+    fn existing_app_categories_are_offered_and_bookmarks_get_none() {
         let c = conn();
-        add_category(&c, "文档", "app");
         add_category(&c, "开发工具", "app");
+        add_category(&c, "文档", "app");
+        add_category(&c, "技术社区", "bookmark");
         c.execute(
             "INSERT INTO ai_models (id, name, base_url, model, key_enc) VALUES (1, '本地', 'http://127.0.0.1:1/v1', 'm', NULL)",
             [],
         )
         .unwrap();
+
+        let plan = prepare(&c, &[item(1, "Loomy.exe", None)], "app", None).unwrap();
+        assert_eq!(plan.allowed, vec!["开发工具".to_string(), "文档".to_string()]);
+
+        // 书签这边压根不给候选名单，也不查记忆
+        let bm = prepare(&c, &[item(2, "掘金", None)], "bookmark", None).unwrap();
+        assert!(bm.allowed.is_empty());
+        assert!(bm.remembered.is_empty());
+    }
+
+    /// 分类规则插不进这一脚：它只决定桌面文件挪去哪儿，应用页照常把「文档」这类
+    /// 已有分类报给模型
+    #[test]
+    fn desktop_rules_do_not_steer_app_categorizing() {
+        let c = conn();
+        add_category(&c, "文档", "app");
+        add_category(&c, "开发工具", "app");
         c.execute(
             "INSERT INTO desktop_rules (category, extensions) VALUES ('文档', '.pdf')",
             [],
         )
         .unwrap();
+        c.execute(
+            "INSERT INTO ai_models (id, name, base_url, model, key_enc) VALUES (1, '本地', 'http://127.0.0.1:1/v1', 'm', NULL)",
+            [],
+        )
+        .unwrap();
 
-        let plan = prepare(&c, &[item(1, "奇怪的东西.bin", None)], "app", None).unwrap();
-        assert_eq!(plan.allowed, vec!["开发工具".to_string()]);
-        assert_eq!(plan.reserved, vec!["文档".to_string()]);
-
-        // 书签这边压根不给候选名单，也不碰分类规则
-        let bm = prepare(&c, &[item(2, "掘金", None)], "bookmark", None).unwrap();
-        assert!(bm.allowed.is_empty());
-        assert!(bm.ruled.is_empty() && bm.remembered.is_empty(), "书签不套规则也不查记忆");
+        let plan = prepare(&c, &[item(1, "报告.pdf", Some("C:/desk/报告.pdf"))], "app", None).unwrap();
+        assert!(plan.remembered.is_empty(), "规则不该替程序判分类");
+        assert_eq!(plan.rest.len(), 1, "有扩展名也照样要问模型");
+        assert_eq!(plan.allowed, vec!["文档".to_string(), "开发工具".to_string()]);
     }
 
     #[test]

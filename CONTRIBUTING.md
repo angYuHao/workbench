@@ -67,7 +67,7 @@ CSP 相关的改动**必须在打包出来的 exe 里验**：`tauri dev` 的页�
 ```
 src/                 前端（见 src/README.md）
   app/               外壳：布局、侧栏、路由表
-  features/          四个主界面各自一个目录：desktop bookmarks files settings
+  features/          四个主界面各自一个目录：apps bookmarks files settings
   shared/            两个以上功能共用的界面件与 hook
   types/             按功能域拆开的类型，index.ts 只做汇总（对面是 src-tauri/src/models/）
   ui/                自研组件库，不引 antd 之类的第三方 UI

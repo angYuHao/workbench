@@ -96,6 +96,7 @@ pub fn run() {
             commands::desktop::get_apps,
             commands::desktop::save_app,
             commands::desktop::delete_app,
+            commands::desktop::sync_installed_apps,
             commands::bookmarks::import_bookmarks,
             commands::bookmarks::analyze_bookmarks,
             commands::bookmarks::apply_bookmark_analysis,

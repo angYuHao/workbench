@@ -25,6 +25,12 @@ pub fn revert_organize(state: State<AppState>, log_id: Option<i64>) -> Result<us
 }
 
 #[tauri::command]
+pub fn sync_installed_apps(state: State<AppState>) -> Result<usize, String> {
+    let conn = state.conn();
+    crate::services::installed::sync_installed(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn launch_app(state: State<AppState>, id: i64) -> Result<(), String> {
     let conn = state.conn();
     crate::services::desktop::launch_by_id(&conn, id).map_err(|e| e.to_string())

@@ -17,16 +17,9 @@ pub fn apply(
     updates: &[ApplyCategorizeUpdate],
 ) -> AppResult<usize> {
     let mut cats = categories::get_categories(conn, item_type)?;
-    // 记忆只给桌面程序记，且规则占用的分类名不记：那是分类规则的活，
-    // 两边都判同一个名字，口径就散了
-    let reserved: Vec<String> = if item_type == "app" {
-        categories::get_rules(conn)?.into_iter().map(|r| r.category).collect()
-    } else {
-        Vec::new()
-    };
     let mut count = 0;
     for update in updates {
-        apply_one(conn, item_type, update, &mut cats, &reserved)?;
+        apply_one(conn, item_type, update, &mut cats)?;
         count += 1;
     }
     Ok(count)
@@ -37,7 +30,6 @@ fn apply_one(
     item_type: &str,
     update: &ApplyCategorizeUpdate,
     cats: &mut Vec<Category>,
-    reserved: &[String],
 ) -> AppResult<()> {
     // 模型或人改出来的分类不存在时先建再用，建完记进 cats 以免同一份里重复建
     let cat_id = match cats.iter().find(|c| c.name == update.category_name) {
@@ -75,7 +67,6 @@ fn apply_one(
                 &update.category_name,
                 update.reason.as_deref().unwrap_or("人工确认的分类"),
                 "确认",
-                reserved,
             )?;
         }
     }
@@ -123,11 +114,15 @@ mod tests {
         assert_eq!(assigned(&c, "SELECT category_id FROM apps WHERE id = 10"), 2);
     }
 
+    /// 同名分类规则不拦记忆：规则只管桌面文件挪去哪儿，程序落到哪个分类都该记住
     #[test]
-    fn rule_owned_categories_stay_out_of_memory() {
+    fn a_rule_named_category_is_still_memorized() {
         let c = conn();
         assert_eq!(apply(&c, "app", &[update(11, "文档", None)]).unwrap(), 1);
-        assert!(memory::list(&c).unwrap().is_empty(), "文档归分类规则管，不该进记忆");
+
+        let hit = memory::lookup(&c, "报告").unwrap().expect("应用完没记进记忆");
+        assert_eq!(hit.category, "文档");
+        assert_eq!(hit.source, "确认");
     }
 
     #[test]

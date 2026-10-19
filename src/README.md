@@ -3,7 +3,7 @@
 ```
 main.tsx / App.tsx    挂载与路由入口
 app/                  外壳：AppLayout、Sidebar（底部是设置入口）、router.tsx 路由表
-features/desktop/     DesktopView + AppIconGrid
+features/apps/        AppsView（「应用」页：开始菜单同步进来的程序）+ AppIconGrid
 features/bookmarks/   BookmarksView + BookmarkAnalysisModal + useBookmarkAnalysis
 features/files/       FilesView + PreviewPanel / OfficePreview / TextPreview / PreviewError
 features/settings/    SettingsModal + 各个 Section + 编辑弹窗

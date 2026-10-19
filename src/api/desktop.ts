@@ -19,6 +19,11 @@ export function launchApp(id: number) {
   return invoke<void>("launch_app", { id });
 }
 
+/** 扫一遍开始菜单，把没收录过的程序收进卡片；回新收录的条数 */
+export function syncInstalledApps() {
+  return invoke<number>("sync_installed_apps");
+}
+
 export function getApps() {
   return invoke<AppEntry[]>("get_apps");
 }

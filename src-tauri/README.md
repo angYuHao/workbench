@@ -10,7 +10,7 @@
 2. `src/lib.rs` 的 `tauri::generate_handler![...]` 登记一条
 3. 前端 `src/api/<域>.ts` 里 `invoke("命令名", { ... })`
 
-**漏第 2 步编译不报错**，运行时才「command not found」。当前基线：`#[tauri::command]` 定义数 == 注册数 == 67（2026-10-18 加唤醒热键的三条命令之后），前端 `invoke` 的字符串全部落在这个集合里。改完命令层就重新数一遍这两个数：
+**漏第 2 步编译不报错**，运行时才「command not found」。当前基线：`#[tauri::command]` 定义数 == 注册数 == 68（2026-10-19 加「应用」页的开始菜单同步之后），前端 `invoke` 的字符串全部落在这个集合里。改完命令层就重新数一遍这两个数：
 
 ```bash
 grep -rc '#\[tauri::command\]' src/commands/*.rs   # 求和
@@ -32,6 +32,16 @@ grep -c 'commands::' src/lib.rs
 ## 连接锁
 
 `state.conn()` 返回 `MutexGuard`。async 命令里**不要跨 `.await` 持有它**：先取出需要的配置、放锁、等网络、再重新取锁写库。`list_remote_ai_models` / `probe_ai_model` 是范例。
+
+## 解析 .lnk 和抽图标要先有 COM
+
+`win::lnk::resolve_lnk`（`IShellLinkW`）和 `win::icon::extract_icon_to_png` 都不自己 `CoInitializeEx`，**线程没初始化 COM 就整片失败**：前者失败会悄悄退回「快捷方式自己的路径」（看着像解析出了 .lnk），后者失败就是每张卡片都没图。
+
+同步命令（非 async）跑在主线程上，tao/WebView2 已经把 COM 起好了，所以 `scan_desktop`、`sync_installed_apps` 在应用里是好的。**在测试线程里直接调这两个 API 会全灭**，要照着 `services::installed::tests::the_real_start_menu_yields_launchable_apps` 那样先 `CoInitializeEx(None, COINIT_APARTMENTTHREADED)`；那条 `#[ignore]` 的测试就是拿真开始菜单核对这一步的（本机跑出 124 个程序、124 张图标）。
+
+## 智能分类只有三步
+
+`services/ai/categorize`：本机记忆 → 大模型 → 联网搜索。**分类规则不参与**——那张表只决定桌面上文件挪去哪个文件夹（`services::desktop::match_category`），跟「这台机器装了什么程序」是两回事，所以 `reserved`（规则占用的分类名）那一整套禁令已经拆掉了。
 
 ## webview 能读到什么
 

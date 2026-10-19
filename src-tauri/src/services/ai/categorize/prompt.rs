@@ -4,31 +4,20 @@
 use crate::models::SmartCategorizeItem;
 
 use super::client::{head, HINT_CHARS};
-use super::same;
 
 
-/// `reserved` 是分类规则已经占用的分类名：那些分类由本地规则判，模型伸手进去会把
-/// 一个名字的口径交给两边改，所以既不让它复用，也不让它新建同名的。
-pub(crate) fn system_prompt(reserved: &[String]) -> String {
-    let mut text = String::from(
+/// 一次判断的规矩写死在这儿：复用优先、分类数要少、只看用途。
+pub(crate) fn system_prompt() -> String {
+    String::from(
         "你在给「个人工作台」里的桌面程序和书签网址分门别类。\n\
          每个条目给且只给一个分类名。优先复用「已有分类」里的名字，复用时必须一字不差；\
          确实没有合适的才新建，新名字用 2 到 6 个汉字的通用叫法，别起带厂商名的怪名。\n\
          分类总数越少越好：能并进已有分类的一律并进去，别按厂牌、语言、细分用途再拆新名；\
          要新建也只建一两个能兜住多个条目的大类，不要造只装得下一个条目的分类。\n\
-         按用途判断，不要机械地看扩展名或域名；名字看不出来的条目给最接近的用途分类。\n",
-    );
-    if !reserved.is_empty() {
-        text.push_str(&format!(
-            "以下分类名归本地规则管，你一个都不许用（不许复用也不许新建同名）：{}。\n",
-            reserved.join("、")
-        ));
-    }
-    text.push_str(
-        "不要解释、不要思考过程，直接输出 JSON 数组本身，形如 \
+         按用途判断，不要机械地看扩展名或域名；名字看不出来的条目给最接近的用途分类。\n\
+         不要解释、不要思考过程，直接输出 JSON 数组本身，形如 \
          [{\"id\":1,\"category\":\"开发工具\",\"reason\":\"IDE\"}]，reason 不超过 12 个字。",
-    );
-    text
+    )
 }
 
 /// 只给名字和网址：本地路径（`target`）不进提示词，模型不需要知道程序装在哪个盘。
@@ -56,17 +45,14 @@ pub(crate) fn user_prompt(items: &[SmartCategorizeItem], category_names: &[Strin
     )
 }
 
-/// 规则占用的名字之外的已有分类，才是可以给模型复用的候选
-/// 桌面：把已有分类（去掉规则占用的那些）报给模型，让它优先复用。
+/// 已有分类里哪些可以报给模型复用。
+/// 应用：把现有分类名报上去，让它优先复用。
 /// 书签：什么都不报 —— 用户 2026-10-15 明确要「不要将原有的分类加入提示词，让 AI 自己分类」，
-/// 并让它在整批里尽量收着分类数。规则占用的名字仍然禁止（merge 里那一道拦着）。
-pub fn names_for_model(item_type: &str, category_names: &[String], reserved: &[String]) -> Vec<String> {
-    if item_type != "app" {
-        return Vec::new();
+/// 并让它在整批里尽量收着分类数。
+pub fn names_for_model(item_type: &str, category_names: &[String]) -> Vec<String> {
+    if item_type == "app" {
+        category_names.to_vec()
+    } else {
+        Vec::new()
     }
-    category_names
-        .iter()
-        .filter(|n| !reserved.iter().any(|r| same(r, n)))
-        .cloned()
-        .collect()
 }

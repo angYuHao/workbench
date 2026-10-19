@@ -582,6 +582,16 @@ pub fn save_app(conn: &Connection, app: &AppEntry) -> AppResult<AppEntry> {
 }
 
 pub fn delete_app(conn: &Connection, id: i64) -> AppResult<()> {
+    // 卡片是删了，可程序还在开始菜单里：不把这条路径记下来，下次同步又把它收回来，等于删了个寂寞
+    let target: Option<String> = conn
+        .query_row("SELECT target FROM apps WHERE id = ?1", params![id], |r| r.get(0))
+        .optional()?;
+    if let Some(target) = target {
+        conn.execute(
+            "INSERT OR REPLACE INTO dismissed_apps (target) VALUES (?1)",
+            params![target],
+        )?;
+    }
     conn.execute("DELETE FROM apps WHERE id = ?1", params![id])?;
     crate::services::usage::forget(conn, crate::services::usage::APP, id)
 }
@@ -596,7 +606,7 @@ pub(crate) fn get_icon_dir() -> AppResult<std::path::PathBuf> {
 /// 自己压根没内嵌图标，抽解析目标只能拿到 Windows 的白纸占位图。
 /// 走 .lnk 时 shell 已经把 IconLocation（含指向 dll 第 N 个图标的写法）算好了，不用我们再解。
 /// 缓存键按「真正用的那个写法」算，换写法就是换键，不会串图。
-fn extract_icon(icon_dir: &Path, candidates: &[&str]) -> Option<String> {
+pub(crate) fn extract_icon(icon_dir: &Path, candidates: &[&str]) -> Option<String> {
     let mut tried: Vec<&str> = Vec::new();
     for target in candidates.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         if tried.contains(&target) {
@@ -628,7 +638,7 @@ pub(crate) fn extension_of(path: &Path) -> String {
 }
 
 /// .lnk 解析为真实启动目标；解析失败或非快捷方式时就是文件自身路径
-fn launch_target(path: &Path) -> String {
+pub(crate) fn launch_target(path: &Path) -> String {
     let own = path.to_string_lossy().to_string();
     if extension_of(path) == "lnk" {
         crate::win::lnk::resolve_lnk(&own).unwrap_or(own)

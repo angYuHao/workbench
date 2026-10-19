@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FolderKanban, Globe, LayoutGrid, Moon, Puzzle, Settings, Sun } from "lucide-react";
+import { AppWindow, FolderKanban, Globe, Moon, Puzzle, Settings, Sun } from "lucide-react";
 import { useSettingsStore } from "../stores/settings";
 import { Tooltip, pressable } from "../ui";
 import SettingsModal from "../features/settings/SettingsModal";
@@ -8,7 +8,7 @@ import SettingsModal from "../features/settings/SettingsModal";
 import appIcon from "../../src-tauri/icons/128x128.png";
 
 const NAV_ITEMS = [
-  { to: "/", icon: LayoutGrid, label: "桌面整理" },
+  { to: "/", icon: AppWindow, label: "应用" },
   { to: "/bookmarks", icon: Globe, label: "网页管理" },
   { to: "/files", icon: FolderKanban, label: "文件管理" },
   { to: "/tools", icon: Puzzle, label: "工具" },

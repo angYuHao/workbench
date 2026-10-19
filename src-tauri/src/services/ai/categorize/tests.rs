@@ -1,8 +1,7 @@
-//! 四步流水线的测试。放在这里而不是每个子文件一份：
-//! 大部分用例要连着看「规则拦了什么、模型收到什么、merge 又拦回什么」才说清意图。
+//! 三步流水线的测试。放在这里而不是每个子文件一份：
+//! 大部分用例要连着看「记忆拦了什么、模型收到什么、merge 又怎么对回条目」才说清意图。
 
 use super::client::{log_request, reply_budget, MAX_REPLY_TOKENS, MIN_REPLY_TOKENS};
-use crate::models::DesktopRule;
 use super::lookup::evidence_prompt;
 use super::lookup::pick_by_keyword;
 use super::parse::parse_rows;
@@ -75,17 +74,13 @@ use super::parse::parse_rows;
         assert!(!prompt.contains("target"), "{prompt}");
     }
 
-    /// 桌面报已有分类（排掉规则占用的），书签什么都不报 —— 让 AI 自己分类
+    /// 程序报已有分类，书签什么都不报 —— 让 AI 自己分类
     #[test]
-    fn only_desktop_shows_the_model_existing_categories() {
+    fn only_apps_show_the_model_existing_categories() {
         let names = cats(&["开发工具", "文档", "AI工具"]);
-        let reserved = cats(&["文档"]);
 
-        assert_eq!(
-            names_for_model("app", &names, &reserved),
-            vec!["开发工具".to_string(), "AI工具".to_string()]
-        );
-        assert!(names_for_model("bookmark", &names, &reserved).is_empty(), "书签不该看到现有分类");
+        assert_eq!(names_for_model("app", &names), names);
+        assert!(names_for_model("bookmark", &names).is_empty(), "书签不该看到现有分类");
     }
 
     #[test]
@@ -97,35 +92,9 @@ use super::parse::parse_rows;
 
     #[test]
     fn the_prompt_asks_for_as_few_categories_as_possible() {
-        let system = system_prompt(&[]);
+        let system = system_prompt();
         assert!(system.contains("分类总数越少越好"), "{system}");
         assert!(system.contains("不要造只装得下一个条目的分类"), "{system}");
-    }
-
-    /// 规则占的名字要从候选里剔掉，还要在提示词里点名列禁
-    #[test]
-    fn rule_owned_names_are_out_of_the_model_view_and_named_as_banned() {
-        let reserved = cats(&["文档", "视频"]);
-        let open = names_for_model("app", &cats(&["文档", "开发工具", "视频"]), &reserved);
-        assert_eq!(open, vec!["开发工具".to_string()], "{open:?}");
-
-        let system = system_prompt(&reserved);
-        assert!(system.contains("以下分类名归本地规则管，你一个都不许用（不许复用也不许新建同名）：文档、视频"), "{system}");
-        // 没有规则时不提这茬，书签那边用不上
-        assert!(!system_prompt(&[]).contains("归本地规则管"));
-    }
-
-    #[test]
-    fn a_rule_owned_category_the_model_insists_on_is_blocked_locally() {
-        let items = vec![item(1, "a", None, None), item(2, "b", None, None)];
-        let rows = vec![row(1, "文档", "文本文件"), row(2, "开发工具", "IDE")];
-        let merged = merge(&items, &rows, &cats(&["文档"]));
-
-        assert_eq!(merged[0].suggested_category, "", "规则占用的分类没拦住");
-        assert!(merged[0].reason.contains("归本地规则管"), "{}", merged[0].reason);
-        assert!(merged[0].reason.contains("文档"), "{}", merged[0].reason);
-        assert_eq!(merged[1].suggested_category, "开发工具");
-        assert_eq!(merged[1].reason, "IDE");
     }
 
     #[test]
@@ -149,7 +118,7 @@ use super::parse::parse_rows;
         let items = vec![item(1, "a", None, None), item(2, "b", None, None), item(3, "c", None, None)];
         // 模型换了顺序、少答一条、又给了一条空分类
         let rows = vec![row(3, "影音娱乐", "播放器"), row(2, "  ", "说不上来")];
-        let merged = merge(&items, &rows, &[]);
+        let merged = merge(&items, &rows);
 
         assert_eq!(merged[0].suggested_category, "");
         assert!(merged[0].reason.contains("手动选"), "{}", merged[0].reason);
@@ -170,7 +139,7 @@ use super::parse::parse_rows;
             model: "glm".into(),
         };
 
-        let rows = classify(&target, &items, &cats(&["开发工具"]), &[])
+        let rows = classify(&target, &items, &cats(&["开发工具"]))
             .await
             .expect("44 条一起发，一次请求就该分完");
         assert_eq!(rows.len(), 44, "{rows:?}");
@@ -229,7 +198,7 @@ use super::parse::parse_rows;
             model: "m".into(),
         };
         let items = vec![item(1, "PyCharm", None, None), item(2, "未知", None, None)];
-        let rows = classify(&target, &items, &cats(&["开发工具"]), &[])
+        let rows = classify(&target, &items, &cats(&["开发工具"]))
             .await
             .expect("接口给 200 + 标准 OpenAI 报文，rig 应该能跑通");
 
@@ -303,7 +272,6 @@ Connection: close
             &target,
             &[item(1, "PyCharm", Some(r"C:\Users\me\Desktop\私密\2月报表.exe"), None)],
             &cats(&["开发工具"]),
-            &cats(&["文档"]),
         )
         .await
         .expect("标准 chat 报文应该能跑通");
@@ -319,7 +287,7 @@ Connection: close
             req.contains(r#""thinking":{"type":"disabled"}"#),
             "思考没关掉，还会被截断：{req}"
         );
-        assert!(req.contains("归本地规则管"), "规则占用名字的禁令没发出去：{req}");
+        assert!(req.contains("已有分类"), "候选分类没发出去：{req}");
         assert!(!req.contains("target"), "还在发本地路径字段：{req}");
         assert!(
             !req.contains("报表") && !req.contains("Desktop"),
@@ -354,47 +322,6 @@ Connection: close
             String::from_utf8_lossy(&raw).to_string()
         });
         (port, handle)
-    }
-
-    fn rule(category: &str, keywords: Option<&str>, exts: Option<&str>) -> DesktopRule {
-        DesktopRule {
-            id: 1,
-            category: category.into(),
-            keywords: keywords.map(Into::into),
-            extensions: exts.map(Into::into),
-            enabled: true,
-            sort: 0,
-        }
-    }
-
-    #[test]
-    fn rule_hits_never_reach_the_model() {
-        let rules = vec![
-            rule("文档", None, Some(".xlsx,.pdf")),
-            rule("开发工具", Some("pycharm,vscode"), None),
-        ];
-        let items = vec![
-            item(1, "报表.xlsx", Some("C:/Desktop/私密/报表.xlsx"), None),
-            item(2, "PyCharm 2023.2.lnk", Some("F:/Program/PyCharm/pycharm64.exe"), None),
-            item(3, "Loomy.lnk", Some("F:/Program/Loomy/loomy.exe"), None),
-        ];
-        let (ruled, rest) = by_rules(&items, &rules);
-
-        // 报表被 .xlsx 规则判成「文档」，连文件名都不出本机
-        assert_eq!(ruled.len(), 2, "{ruled:?}");
-        assert_eq!(ruled[0].suggested_category, "文档");
-        assert!(ruled[0].reason.contains("分类规则"), "{}", ruled[0].reason);
-        assert_eq!(ruled[1].suggested_category, "开发工具");
-        assert_eq!(rest.len(), 1, "{rest:?}");
-        assert_eq!(rest[0].name, "Loomy.lnk");
-    }
-
-    #[test]
-    fn without_rules_everything_goes_to_the_model() {
-        let items = vec![item(1, "a.docx", None, None)];
-        let (ruled, rest) = by_rules(&items, &[]);
-        assert!(ruled.is_empty());
-        assert_eq!(rest.len(), 1);
     }
 
     #[test]

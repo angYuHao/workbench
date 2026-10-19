@@ -1,7 +1,7 @@
 //! 智能分类的本机记忆：一个软件判过一次就记住，下次既不用问模型也不用联网。
 //!
-//! 记的东西要短：名字 → 分类 + 一句话依据 + 从哪来的 + 什么时候。规则管着的那些分类
-//! （文档、图片、压缩包、视频…）不往这儿记 —— 那是分类规则的活，记了就是两个源头判同一个名字。
+//! 记的东西要短：名字 → 分类 + 一句话依据 + 从哪来的 + 什么时候。
+//! 分类规则不参与：那是决定桌面文件挪去哪个文件夹的，跟程序该记成哪类没关系。
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -45,19 +45,17 @@ pub fn lookup(conn: &Connection, name: &str) -> AppResult<Option<Memory>> {
     Ok(found)
 }
 
-/// 记下一条判断。分类名撞进 `reserved`（分类规则占用的那些）就不记，回 false 让调用方知道没存。
-/// 同一个名字再记一次是覆盖：判断改了就更新，旧的那条不留着。
+/// 记下一条判断。同一个名字再记一次是覆盖：判断改了就更新，旧的那条不留着。
 pub fn remember(
     conn: &Connection,
     name: &str,
     category: &str,
     evidence: &str,
     source: &str,
-    reserved: &[String],
 ) -> AppResult<bool> {
     let name = name.trim();
     let category = category.trim();
-    if name.is_empty() || category.is_empty() || reserved.iter().any(|r| r.trim() == category) {
+    if name.is_empty() || category.is_empty() {
         return Ok(false);
     }
     let mut short: String = evidence.trim().chars().take(EVIDENCE_CHARS).collect();
@@ -105,14 +103,10 @@ mod tests {
         c
     }
 
-    fn reserved() -> Vec<String> {
-        ["文档", "图片"].iter().map(|s| s.to_string()).collect()
-    }
-
     #[test]
     fn a_remembered_software_is_found_again() {
         let c = conn();
-        assert!(remember(&c, "Loomy", "AI办公", "Loomy（loomy.ai）", "search", &reserved()).unwrap());
+        assert!(remember(&c, "Loomy", "AI办公", "Loomy（loomy.ai）", "search").unwrap());
 
         let hit = lookup(&c, "loomy").unwrap().expect("大小写不同就该也算同一条");
         assert_eq!(hit.category, "AI办公");
@@ -121,20 +115,10 @@ mod tests {
     }
 
     #[test]
-    fn rule_owned_categories_are_not_memorized() {
-        let c = conn();
-        assert!(
-            !remember(&c, "报告", "文档", "扩展名判的", "model", &reserved()).unwrap(),
-            "文档归分类规则管，不该进记忆"
-        );
-        assert!(list(&c).unwrap().is_empty());
-    }
-
-    #[test]
     fn a_second_judgement_overwrites_the_first() {
         let c = conn();
-        remember(&c, "WorkBuddy", "AI办公", "旧的", "search", &reserved()).unwrap();
-        remember(&c, "WorkBuddy", "开发工具", "新的", "model", &reserved()).unwrap();
+        remember(&c, "WorkBuddy", "AI办公", "旧的", "search").unwrap();
+        remember(&c, "WorkBuddy", "开发工具", "新的", "model").unwrap();
 
         let all = list(&c).unwrap();
         assert_eq!(all.len(), 1, "{all:?}");
@@ -146,7 +130,7 @@ mod tests {
     fn evidence_is_kept_to_one_line() {
         let c = conn();
         let long = "很".repeat(300);
-        remember(&c, "X", "工具", &long, "search", &reserved()).unwrap();
+        remember(&c, "X", "工具", &long, "search").unwrap();
 
         let hit = lookup(&c, "X").unwrap().unwrap();
         assert!(hit.evidence.chars().count() <= EVIDENCE_CHARS + 1, "{}", hit.evidence.chars().count());
@@ -156,11 +140,11 @@ mod tests {
     #[test]
     fn empty_names_and_categories_are_refused_and_clear_empties() {
         let c = conn();
-        assert!(!remember(&c, "  ", "工具", "", "search", &reserved()).unwrap());
-        assert!(!remember(&c, "X", "  ", "", "search", &reserved()).unwrap());
+        assert!(!remember(&c, "  ", "工具", "", "search").unwrap());
+        assert!(!remember(&c, "X", "  ", "", "search").unwrap());
         assert_eq!(clear(&c).unwrap(), 0);
 
-        remember(&c, "X", "工具", "", "search", &reserved()).unwrap();
+        remember(&c, "X", "工具", "", "search").unwrap();
         assert_eq!(clear(&c).unwrap(), 1);
         assert!(lookup(&c, "X").unwrap().is_none());
     }

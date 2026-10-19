@@ -41,13 +41,11 @@ pub fn pick_by_keyword(text: &str, candidates: &[String]) -> Option<String> {
 /// 模型没判出来的：联网查 → 摘要里关键词命中 → 还对不上就带着摘要再问一次模型。
 /// 这里不写数据库：判出来的东西要等你在窗口里确认应用了才算数（写记忆归
 /// `apply_categorize` 那一步），不然模型随口一个猜测就把这软件永久定死了。
-/// 规则占用的分类名不算命中。
 pub async fn fill_by_search(
     target: &ChatTarget,
     blanks: &[SmartCategorizeItem],
-    // allowed：可以复用的已有分类（已经排掉规则占用的；书签传空）
+    // allowed：可以复用的已有分类（书签那边传空）
     allowed: &[String],
-    reserved: &[String],
 ) -> Vec<SmartCategorizeResult> {
     let mut out = Vec::new();
     let mut ask: Vec<(SmartCategorizeItem, String)> = Vec::new();
@@ -65,7 +63,7 @@ pub async fn fill_by_search(
             .collect::<Vec<_>>()
             .join(" ");
         match pick_by_keyword(&joined, allowed) {
-            Some(category) if !reserved.iter().any(|r| r.trim() == category) => {
+            Some(category) => {
                 let evidence = snippets[0].evidence();
                 out.push(SmartCategorizeResult {
                     id: item.id,
@@ -91,7 +89,7 @@ pub async fn fill_by_search(
     let items: Vec<SmartCategorizeItem> = ask.iter().map(|(item, _)| item.clone()).collect();
     let prompt = evidence_prompt(&ask, allowed);
     let tag = format!("AI分类带资料 {}条", items.len());
-    let rows = match ask_model(target, &system_prompt(reserved), &prompt, &tag, items.len()).await {
+    let rows = match ask_model(target, &system_prompt(), &prompt, &tag, items.len()).await {
         Ok(rows) => rows,
         Err(e) => {
             let why = format!("带着资料问模型也失败：{}", head(&e.to_string(), 80));
@@ -99,7 +97,7 @@ pub async fn fill_by_search(
             return out;
         }
     };
-    out.extend(merge(&items, &rows, reserved));
+    out.extend(merge(&items, &rows));
     out
 }
 
