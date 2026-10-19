@@ -64,11 +64,11 @@ export default function AppsView() {
   const sync = async (manual: boolean) => {
     setSyncing(true);
     try {
-      const n = await syncInstalledApps();
+      const r = await syncInstalledApps();
       await loadApps();
-      const total = useDesktopStore.getState().apps.length;
-      if (n > 0) message.success(`从开始菜单新收录 ${n} 个程序`);
-      else if (manual) message.info(`开始菜单里没有新程序，当前 ${total} 个`);
+      const skipped = r.filtered > 0 ? `，按过滤名单跳过 ${r.filtered} 个` : "";
+      if (r.inserted > 0) message.success(`从开始菜单新收录 ${r.inserted} 个程序${skipped}`);
+      else if (manual) message.info(`开始菜单里没有新程序，当前 ${r.total} 个${skipped}`);
     } catch (e) {
       message.error(String(e));
     } finally {

@@ -51,3 +51,19 @@ export interface DesktopRule {
   enabled: boolean;
   sort: number;
 }
+
+/** 一次开始菜单同步（或试算）的账单 */
+export interface SyncReport {
+  /** 开始菜单里扫出多少个可启动的快捷方式 */
+  scanned: number;
+  /** 本次收进来的；试算时是「会收进来的」 */
+  inserted: number;
+  /** 命中过滤名单没收的 */
+  filtered: number;
+  /** 库里已经有的 */
+  already: number;
+  /** 库里现在一共多少张卡片 */
+  total: number;
+  /** 被挡掉的名字，最多 12 个 */
+  samples: string[];
+}

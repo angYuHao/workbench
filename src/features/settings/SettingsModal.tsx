@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Ban, Bot, DatabaseBackup, Rocket, Search } from "lucide-react";
+import { Ban, Bot, DatabaseBackup, Filter, Rocket, Search } from "lucide-react";
 import { useSettingsStore } from "../../stores/settings";
 import { deleteAiModel, getAiModels, probeAiModel, openAiLog, readAiLog } from "../../api/aiModels";
 import { clearAiMemory, getAiMemory } from "../../api/smart";
@@ -12,6 +12,7 @@ import {
 } from "../../api/bookmarks";
 import { Input, Modal, ModalConfirm, message } from "../../ui";
 import BlacklistSection from "./BlacklistSection";
+import AppFilterSection from "./AppFilterSection";
 import DataSection from "./DataSection";
 import ModelEditModal from "./ModelEditModal";
 import ModelsSection from "./ModelsSection";
@@ -27,6 +28,14 @@ const SECTIONS = [
     desc: "任何 OpenAI 兼容接口都可以：填地址、模型名和密钥，没有预设厂商可选",
     icon: Bot,
     words: "模型 api key 密钥 接口 openai chatgpt deepseek 大模型 记忆 联网 搜索 日志 log",
+  },
+  {
+    key: "appFilter",
+    group: "应用",
+    label: "应用过滤",
+    desc: "同步开始菜单时跳过系统应用，也能自己加模式",
+    icon: Filter,
+    words: "过滤 屏蔽 忽略 系统应用 开始菜单 同步 名单 filter",
   },
   {
     key: "blacklist",
@@ -227,7 +236,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
 
           <div className="settings-main">
             {!active ? (
-              <div className="settings-nav-empty">换个词试试，比如「备份」「扩展名」</div>
+              <div className="settings-nav-empty">换个词试试，比如「备份」「过滤」</div>
             ) : (
               <>
                 <h3 className="settings-h">{active.label}</h3>
@@ -251,6 +260,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                     onClearPageCache={handleClearPageCache}
                   />
                 )}
+                {active.key === "appFilter" && <AppFilterSection />}
                 {active.key === "blacklist" && (
                   <BlacklistSection
                     entries={blacklist}

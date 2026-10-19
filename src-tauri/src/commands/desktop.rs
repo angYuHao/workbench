@@ -25,9 +25,38 @@ pub fn revert_organize(state: State<AppState>, log_id: Option<i64>) -> Result<us
 }
 
 #[tauri::command]
-pub fn sync_installed_apps(state: State<AppState>) -> Result<usize, String> {
+pub fn sync_installed_apps(
+    state: State<AppState>,
+) -> Result<crate::services::installed::SyncReport, String> {
     let conn = state.conn();
     crate::services::installed::sync_installed(&conn).map_err(|e| e.to_string())
+}
+
+/// 同一次扫描但不写库：设置里加完模式要点一下才知道挡了谁
+#[tauri::command]
+pub fn preview_installed_apps(
+    state: State<AppState>,
+) -> Result<crate::services::installed::SyncReport, String> {
+    let conn = state.conn();
+    crate::services::installed::preview_installed(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_app_filters(state: State<AppState>) -> Result<Vec<String>, String> {
+    let conn = state.conn();
+    crate::services::installed::get_app_filters(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn add_app_filter(state: State<AppState>, pattern: String) -> Result<bool, String> {
+    let conn = state.conn();
+    crate::services::installed::add_app_filter(&conn, &pattern).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn remove_app_filter(state: State<AppState>, pattern: String) -> Result<bool, String> {
+    let conn = state.conn();
+    crate::services::installed::remove_app_filter(&conn, &pattern).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

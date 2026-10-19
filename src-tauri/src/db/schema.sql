@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS apps (
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 「应用」页的过滤名单：开始菜单同步时命中就不收。用户手加的模式，开关式的「系统应用」另存 settings
+CREATE TABLE IF NOT EXISTS app_filters (
+  pattern    TEXT PRIMARY KEY COLLATE NOCASE,
+  added_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 网址收藏
 CREATE TABLE IF NOT EXISTS bookmarks (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
