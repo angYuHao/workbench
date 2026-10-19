@@ -115,30 +115,33 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
       <div className="content-pane">
         <div className="tool-grid">
           <Action
+            lead
             icon={<Wand2 size={22} strokeWidth={1.5} />}
             title="一键整理"
+            sub="扫桌面，按规则归位"
             desc="扫一遍桌面（含子文件夹），按分类规则把文件归进 桌面\桌面整理\分类。也可以只登记程序、文件原地不动。"
-            extra={rules.length ? `${rules.length} 条分类规则在用` : "还没有分类规则，全部会落到「其他」"}
+            chip={rules.length ? `${rules.length} 条规则在用` : "无规则：全部落「其他」"}
+            action="开始整理"
             onClick={handleOrganizeClick}
             loading={organizing}
-            action="开始整理"
           />
           <Action
             icon={<Undo2 size={22} strokeWidth={1.5} />}
             title="恢复整理"
+            sub="把搬走的原样放回去"
             desc="把之前移动进「桌面整理」的文件搬回桌面原位置，「应用」页卡片的路径跟着改回来。"
+            action="恢复"
             onClick={handleRevert}
             loading={reverting}
-            action="恢复"
-            danger
           />
           <Action
             icon={<ListFilter size={22} strokeWidth={1.5} />}
             title="分类规则"
+            sub="什么文件进哪个分类"
             desc="关键词或扩展名命中就归某个分类。改分类名会连桌面上的那个文件夹一起改名。"
-            extra={rules.length ? `${rules.length} 条规则，按排序从小到大命中` : undefined}
-            onClick={() => setRulesOpen(true)}
+            chip={`${rules.length} 条规则`}
             action="查看规则"
+            onClick={() => setRulesOpen(true)}
           />
         </div>
       </div>
@@ -229,46 +232,47 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
   );
 }
 
-/** 一张动作卡：图标 + 名字 + 一句说明，右下角那一下才是真正的按钮 */
+/**
+ * 一张动作卡：实心图标砖 + 名字/一句角色 + 说明 + 底栏（状态 chip 与按钮同一条线）。
+ * 三张卡等高，说明文字长短不会把按钮顶歪；lead 那张才是主行动，另外两张只上浅底。
+ */
 function Action({
   icon,
   title,
+  sub,
   desc,
-  extra,
+  chip,
   action,
   onClick,
   loading,
-  danger,
+  lead,
 }: {
   icon: ReactNode;
   title: string;
+  sub: string;
   desc: string;
-  extra?: string;
+  chip?: string;
   action: string;
   onClick: () => void;
   loading?: boolean;
-  danger?: boolean;
+  lead?: boolean;
 }) {
   return (
-    <div className="card totp-card">
-      <div className="totp-head">
-        <div className="tool-card-icon">{icon}</div>
-        <div className="stack" style={{ flex: 1, minWidth: 0 }}>
-          <div className="totp-title">{title}</div>
-          <div className="tool-card-desc">{desc}</div>
+    <div className="card act-card">
+      <div className="act-head">
+        <span className={lead ? "act-icon lead" : "act-icon"}>{icon}</span>
+        <div className="stack" style={{ minWidth: 0 }}>
+          <div className="act-title ellipsis">{title}</div>
+          <div className="act-sub ellipsis">{sub}</div>
         </div>
       </div>
-      {extra && <span className="label">{extra}</span>}
-      {/* 三张卡在网格里等高，按钮靠 margin-top:auto 顶到底：说明文字长短不一也不会错开 */}
-      <Button
-        type="primary"
-        onClick={onClick}
-        loading={loading}
-        danger={danger}
-        style={{ alignSelf: "flex-end", marginTop: "auto" }}
-      >
-        {action}
-      </Button>
+      <p className="act-desc">{desc}</p>
+      <div className="act-foot">
+        {chip ? <span className="act-chip">{chip}</span> : <span />}
+        <Button type={lead ? "primary" : "default"} onClick={onClick} loading={loading}>
+          {action}
+        </Button>
+      </div>
     </div>
   );
 }
