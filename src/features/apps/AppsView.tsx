@@ -29,6 +29,9 @@ const emptyApp: AppEntry = {
   useCount: 0,
 };
 
+/** 智能分类只碰这些后缀，其余（文档、压缩包、文件夹）留在本机人工归 */
+const PROGRAM_EXTS = ["lnk", "exe", "app", "msi", "bat", "cmd", "com", "scr"];
+
 /**
  * 「应用」页：把开始菜单里的快捷方式收成卡片，双击打开。
  * 数据在打开时同步一次（只增不改），分类按用途交给智能分类，跟桌面上的分类规则无关。
@@ -108,8 +111,19 @@ export default function AppsView() {
   /** 智能分类的「只处理新增」：未分类和堆在「其他」里的才判，已经进了真分类的跳过 */
   const [smartOnlyNew, setSmartOnlyNew] = useState(true);
   const otherCategoryId = useMemo(() => categories.find((c) => c.name === "其他")?.id ?? null, [categories]);
+  /**
+   * 只有程序进模型。老桌面登记那批里混着文档卡片（工资表这种），它们的名字一旦进提示词就出本机；
+   * 而「按功能分类」说的是应用，文档本来就不该由模型猜——要归类自己拖到分类上。
+   */
+  const isProgram = (a: AppEntry) => {
+    const t = a.target.toLowerCase();
+    if (t.includes("://")) return true;
+    const dot = t.lastIndexOf(".");
+    return dot < 0 || PROGRAM_EXTS.includes(t.slice(dot + 1));
+  };
   const smartTargets = (onlyNew: boolean) =>
     visibleApps
+      .filter((a) => isProgram(a))
       .filter((a) => !onlyNew || a.categoryId === null || a.categoryId === otherCategoryId)
       .map((a) => ({ id: a.id, name: a.name, target: a.target, url: null }));
 
@@ -278,11 +292,16 @@ export default function AppsView() {
         nameTitle="名称"
         stripExtension
         extra={
-          <Checkbox
-            checked={smartOnlyNew}
-            onChange={(v) => restartSmart(v)}
-            label="只判「未分类」和落在「其他」里的，已经进了真分类的跳过"
-          />
+          <>
+            <Checkbox
+              checked={smartOnlyNew}
+              onChange={(v) => restartSmart(v)}
+              label="只判「未分类」和落在「其他」里的，已经进了真分类的跳过"
+            />
+            <span className="label">
+              只把程序发给模型：从老桌面登记里留下的文档、压缩包那类卡片不在这儿判，要归类就把它拖到左边的分类上。
+            </span>
+          </>
         }
       />
     </div>
