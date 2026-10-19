@@ -18,9 +18,6 @@ const blankRule: DesktopRule = {
   sort: 0,
 };
 
-/** 后端 match_category 命中不到规则时回的就是这个字，两边得一致 */
-const FALLBACK = "其他";
-
 /**
  * 桌面整理工具：只管桌面上那一堆文件。三个动作——扫一遍归位、搬回原处、改规则。
  * 卡片和分类在「应用」页，那儿只读开始菜单，不碰这里的规则。
@@ -40,15 +37,11 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
     loadRules().catch((e) => message.error(String(e)));
   }, []);
 
-  const categoryOptions = useMemo(() => {
-    // 目标分类就是分类规则里那些名字（按规则排序去重）；「其他」是规则都没命中时的去向，
-    // 每行都给这一项、并标清楚它不是规则，免得数下来对不上
-    const names = [...new Set(rules.map((r) => r.category.trim()).filter(Boolean))];
-    return [...names, FALLBACK].map((n) => ({
-      label: n === FALLBACK ? `${n}（规则没命中）` : n,
-      value: n,
-    }));
-  }, [rules]);
+  const categoryOptions = useMemo(
+    () =>
+      [...new Set(rules.map((r) => r.category.trim()).filter(Boolean))].map((n) => ({ label: n, value: n })),
+    [rules]
+  );
   const newPlans = useMemo(() => (onlyNew ? plans.filter((p) => !p.registered) : plans), [plans, onlyNew]);
   const skippedPlans = plans.length - newPlans.length;
 
@@ -180,6 +173,8 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
                   size="small"
                   style={{ width: 130 }}
                   value={record.category}
+                  // 这一项不在规则里（规则都没命中）时，框里说的是它默认会去哪儿，不是一个选项
+                  placeholder={`默认「${record.category}」`}
                   options={categoryOptions}
                   onChange={(v) =>
                     setPlans((prev) =>
@@ -193,8 +188,8 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
         />
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="label">
-            目标分类就是分类规则里的 {categoryOptions.length - 1} 个分类名；最后那个
-            <b>「{FALLBACK}（规则没命中）」</b>不是规则，是这一项一条规则都没撞上时的去向。
+            下拉里只有分类规则的那些分类名。某一项一条规则都没撞上时，框里显示的是它默认的去向，不是选项；
+            想让这种文件也归到某个分类，去「分类规则」里加一条。
           </span>
           <Checkbox
             checked={onlyNew}
