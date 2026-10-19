@@ -1,6 +1,6 @@
 [package]
 name = "workbench"
-version = "1.0.0"
+version = "1.0.1"
 description = "个人工作台 - 桌面整理 / 网址管理 / 文件管理"
 authors = ["workbench"]
 edition = "2021"
