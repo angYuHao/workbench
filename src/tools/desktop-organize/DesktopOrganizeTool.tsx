@@ -61,12 +61,12 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
       [...new Set(rules.map((r) => r.category.trim()).filter(Boolean))].map((n) => ({ label: n, value: n })),
     [rules]
   );
-  /** 左边那一列：规则里的分类在前，扫出来却不在规则里的（比如「其他」）跟在后面 */
+  /** 左边那一列只列分类规则里的分类名：规则没命中的那些不算一个分类，只在「全部」里看得见，
+   *  要它也成一行就去分类规则里加一条 */
   const catRows = useMemo(() => {
     const counts = new Map<string, number>();
     for (const it of items) counts.set(it.category, (counts.get(it.category) ?? 0) + 1);
-    const names = [...categoryOptions.map((o) => o.value), ...[...counts.keys()].filter((c) => !categoryOptions.some((o) => o.value === c))];
-    return names.map((name) => ({ name, count: counts.get(name) ?? 0 }));
+    return categoryOptions.map((o) => ({ name: o.value, count: counts.get(o.value) ?? 0 }));
   }, [items, categoryOptions]);
 
   const visible = useMemo(
@@ -171,7 +171,7 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
             ))}
             {!rules.length && (
               <div className="label" style={{ marginTop: 8 }}>
-                还没有分类规则，扫出来的东西都会落到「其他」。
+                还没有分类规则：扫出来的东西都会先进「其他」这个文件夹。点上面的「分类规则」加一条就有别的去向。
               </div>
             )}
           </div>
