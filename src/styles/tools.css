@@ -77,11 +77,6 @@
   padding: 12px 8px 10px;
 }
 
-/* 已经登记过的不是这次要处理的，压暗一档，让新增的自己浮出来 */
-.org-tile.done {
-  opacity: 0.55;
-}
-
 .org-name {
   width: 100%;
   font-size: 12px;

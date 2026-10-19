@@ -39,8 +39,6 @@ pub struct DesktopItem {
     pub is_lnk: bool,
     pub category: String,
     pub icon_path: Option<String>,
-    /// 启动器里已经有这一条了（按 .lnk 自身和解析出的目标两种写法认）
-    pub registered: bool,
 }
 
 /// 用户确认整理时提交的一条计划
@@ -49,9 +47,6 @@ pub struct DesktopItem {
 pub struct OrganizePlan {
     pub path: String,
     pub category: String,
-    pub icon_path: Option<String>,
-    /// 只登记进启动器、不搬桌面文件
-    pub skip_move: Option<bool>,
 }
 
 /// 整理流水，用于「恢复整理」把文件搬回原位

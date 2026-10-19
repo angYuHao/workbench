@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ListFilter, Undo2, Wand2 } from "lucide-react";
 import { organizeDesktop, revertOrganize, scanDesktop } from "../../api/desktop";
 import { useSettingsStore } from "../../stores/settings";
-import { Button, Checkbox, Empty, Modal, ModalConfirm, Select, Space, Spin, Table, message, pressable } from "../../ui";
+import { Button, Empty, Modal, ModalConfirm, Select, Space, Spin, Table, message, pressable } from "../../ui";
 import IconWithFallback from "../../shared/IconWithFallback";
 import { stripExt } from "../../utils/fileKind";
 import RulesSection from "./RulesSection";
@@ -32,8 +32,6 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
   const [organizeOpen, setOrganizeOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [edit, setEdit] = useState<DesktopRule | null>(null);
-  const [onlyNew, setOnlyNew] = useState(true);
-  const [registerOnly, setRegisterOnly] = useState(true);
   const [reverting, setReverting] = useState(false);
 
   /** 扫桌面要解析 .lnk、抽图标，是这一屏唯一慢的一步；回扫到的东西，出错回 null */
@@ -73,10 +71,6 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
     () => (activeCat === null ? items : items.filter((i) => i.category === activeCat)),
     [items, activeCat]
   );
-  const newCount = items.filter((i) => !i.registered).length;
-
-  const plans = useMemo(() => (onlyNew ? items.filter((i) => !i.registered) : items), [items, onlyNew]);
-  const skippedPlans = items.length - plans.length;
 
   const handleOrganizeClick = async () => {
     // 屏上的东西可能已经放了一会儿了，执行前重新扫一遍，别按旧账搬
@@ -86,28 +80,17 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
       message.info("桌面没有可整理的东西");
       return;
     }
-    // 全都登记过了也照常开弹窗：不然那个「只处理新增」的勾没地方取消，旧卡片再也重做不了
-    setRegisterOnly(true);
     setOrganizeOpen(true);
   };
 
   const handleOrganize = async () => {
-    if (!plans.length) {
-      message.info("这次没有要处理的项：去掉「只处理新增」就能连已经登记的一起做");
+    if (!items.length) {
+      message.info("没有要整理的项");
       return;
     }
-    const payload: OrganizePlan[] = plans.map((p) => ({
-      path: p.path,
-      category: p.category,
-      iconPath: p.iconPath,
-      skipMove: registerOnly,
-    }));
+    const payload: OrganizePlan[] = items.map((p) => ({ path: p.path, category: p.category }));
     const logs = await organizeDesktop(payload);
-    message.success(
-      registerOnly
-        ? `已添加 ${plans.length} 个程序到「应用」页`
-        : `已移动 ${logs.length} 个文件到「桌面整理」并加入「应用」页`,
-    );
+    message.success(`已移动 ${logs.length} 个文件到「桌面整理」`);
     setOrganizeOpen(false);
     await scan();
   };
@@ -116,7 +99,7 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
     ModalConfirm({
       title: "恢复桌面整理？",
       content:
-        "把之前移动进「桌面\\桌面整理」的文件搬回桌面原位置，「应用」页卡片的路径会跟着改回来；只登记没移动过的程序不受影响。",
+        "把之前移动进「桌面\\桌面整理」的文件搬回桌面原位置，被搬空的分类目录一并收掉；整理从来没往「应用」页登记过东西，那边不受影响。",
       onOk: async () => {
         setReverting(true);
         try {
@@ -180,7 +163,6 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
         <div className="content-pane">
           <div className="org-summary">
             <span className="chip">桌面 {items.length} 项</span>
-            <span className="chip">新增 {newCount} 项</span>
             <span className="label">
               下面是按分类规则算出来的去向；要改某一项归到哪儿，点「一键整理」在确认窗口里逐条改。
             </span>
@@ -195,17 +177,10 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
           ) : (
             <div className="org-grid">
               {visible.map((it) => (
-                <div
-                  key={it.path}
-                  className={it.registered ? "card org-tile done" : "card org-tile"}
-                  title={it.path}
-                >
+                <div key={it.path} className="card org-tile" title={it.path}>
                   <IconWithFallback name={it.name} iconPath={it.iconPath} size={44} />
                   <div className="org-name ellipsis">{stripExt(it.name)}</div>
-                  <div className="org-cat ellipsis">
-                    {it.category}
-                    {it.registered ? " · 已登记" : ""}
-                  </div>
+                  <div className="org-cat ellipsis">{it.category}</div>
                 </div>
               ))}
             </div>
@@ -218,11 +193,11 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
         open={organizeOpen}
         onCancel={() => setOrganizeOpen(false)}
         onOk={handleOrganize}
-        okText={registerOnly ? "添加到应用页" : "移动并添加"}
+        okText={`移动 ${items.length} 项`}
         width={760}
       >
         <Table
-          dataSource={plans}
+          dataSource={items}
           rowKey={(r) => r.path}
           size="small"
           scroll={{ y: 360 }}
@@ -254,29 +229,13 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
         />
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="label">
+            确定后这些文件会移进 <b>桌面\桌面整理\分类</b> 目录，同名会加 (1)(2)；移完点「恢复整理」原路搬回。
+            整理只搬文件，不会把它们登记到「应用」页。
+          </span>
+          <span className="label">
             下拉里只有分类规则的那些分类名。某一项一条规则都没撞上时，框里显示的是它默认的去向，不是选项；
             想让这种文件也归到某个分类，去「分类规则」里加一条。
           </span>
-          <Checkbox
-            checked={onlyNew}
-            onChange={setOnlyNew}
-            label="只处理新增：已经在「应用」页里的项这次不动"
-          />
-          {onlyNew && skippedPlans > 0 && (
-            <span className="label">
-              已跳过 {skippedPlans} 个登记过的，下面这 {plans.length} 个是新增的。要连旧的一起重抽图标或重新归类，就去掉上面这个勾。
-            </span>
-          )}
-          <Checkbox
-            checked={registerOnly}
-            onChange={setRegisterOnly}
-            label="只把程序登记进「应用」页，桌面上的文件保持原地不动"
-          />
-          {!registerOnly && (
-            <span className="label">
-              取消勾选会把文件移进 桌面\桌面整理\分类 目录，同名会加 (1)(2)；移完可用「恢复整理」搬回去。
-            </span>
-          )}
         </div>
       </Modal>
 

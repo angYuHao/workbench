@@ -24,26 +24,7 @@ pub fn scan_desktop(conn: &Connection) -> AppResult<Vec<DesktopItem>> {
     }
     items.sort_by_key(|a| a.name.to_lowercase());
     items.dedup_by(|a, b| a.path == b.path);
-
-    // 一次查出启动器已有的 target，标好「这条已经整理过了」给前端的「只处理新增」用
-    let known: std::collections::HashSet<String> = conn
-        .prepare("SELECT target FROM apps")?
-        .query_map([], |r| r.get::<_, String>(0))?
-        .filter_map(Result::ok)
-        .map(|t| t.to_lowercase())
-        .collect();
-    mark_registered(&mut items, &known);
     Ok(items)
-}
-
-/// 启动器里是不是已经有这一项：`.lnk` 自身和它解析出来的目标两种写法都算，
-/// 因为登记时到底存的哪一个取决于当时是「只登记」还是「移动并添加」。
-/// Windows 路径不分大小写，所以两边都折成小写再比。
-fn mark_registered(items: &mut [DesktopItem], known: &std::collections::HashSet<String>) {
-    for item in items {
-        item.registered = known.contains(&item.path.to_lowercase())
-            || known.contains(&item.target.to_lowercase());
-    }
 }
 
 /// 扫描要绕开工作台自己：桌面上那个快捷方式指的就是这个程序，
@@ -152,7 +133,6 @@ fn scan_directory(
             is_lnk,
             category,
             icon_path,
-            registered: false,
         });
     }
 }
@@ -163,7 +143,9 @@ pub fn organize_desktop(conn: &Connection, plans: &[OrganizePlan]) -> AppResult<
     organize_into(conn, plans, Path::new(&desktop))
 }
 
-/// 真正干活的一层：`desktop` 当桌面根目录用，测试传临时目录进来就能真的跑一遍搬移
+/// 真正干活的一层：`desktop` 当桌面根目录用，测试传临时目录进来就能真的跑一遍搬移。
+/// 只搬文件 + 记流水，**不往 `apps` 里登记**：桌面上的东西什么都有（文档、压缩包、图片），
+/// 塞进启动器就等于把「本机装了什么程序」那一页污染掉，两边各管各的表。
 pub(crate) fn organize_into(
     conn: &Connection,
     plans: &[OrganizePlan],
@@ -181,22 +163,6 @@ pub(crate) fn organize_into(
         if file_name.is_empty() {
             continue;
         }
-
-        if plan.skip_move.unwrap_or(false) {
-            upsert_app_from_desktop(
-                conn,
-                &file_name,
-                &launch_target(src),
-                std::slice::from_ref(&plan.path),
-                &plan.category,
-                plan.icon_path.as_deref(),
-            )?;
-            continue;
-        }
-
-        // 移动之前先把这个程序的「另一种写法」记下来：桌面上的原路径，以及快捷方式指向的真实目标。
-        // 只登记模式存的是后者，搬移模式存的是归档后的 .lnk，不一起认就会插成两条。
-        let resolved = launch_target(src);
 
         std::fs::create_dir_all(&base)?;
         let cat_dir = base.join(&plan.category);
@@ -220,15 +186,6 @@ pub(crate) fn organize_into(
             organized_at: None,
             reverted: false,
         });
-
-        upsert_app_from_desktop(
-            conn,
-            &file_name,
-            &to_path,
-            &[plan.path.clone(), resolved],
-            &plan.category,
-            plan.icon_path.as_deref(),
-        )?;
     }
     Ok(logs)
 }
@@ -439,9 +396,8 @@ pub fn revert_organize(conn: &Connection, log_id: Option<i64>) -> AppResult<usiz
             continue;
         };
         if !Path::new(to).exists() {
-            // 副本已不在分类目录里，只补记状态；启动器那条还得跟回原位置
+            // 副本已经不在分类目录里了（用户自己挪走或删了），只补记状态
             mark_reverted(conn, log.id)?;
-            repoint_app(conn, from, to)?;
             continue;
         }
         // 原位置已被占用则删掉副本，否则移回原位置
@@ -452,7 +408,6 @@ pub fn revert_organize(conn: &Connection, log_id: Option<i64>) -> AppResult<usiz
         };
         if restored {
             mark_reverted(conn, log.id)?;
-            repoint_app(conn, from, to)?;
             count += 1;
             if let Some(cat_dir) = Path::new(to).parent() {
                 if cat_dir.parent().and_then(|p| p.file_name()).map(is_organize_base_name) == Some(true) {
@@ -467,27 +422,6 @@ pub fn revert_organize(conn: &Connection, log_id: Option<i64>) -> AppResult<usiz
 
 fn is_organize_base_name(name: &std::ffi::OsStr) -> bool {
     name.to_string_lossy().eq_ignore_ascii_case(ORGANIZE_DIR)
-}
-
-/// 撤销整理后，启动器里指向分类目录的那条要跟回原位置，否则点开是死链；
-/// 原位置已经有一条（先前只登记过同一个文件）就删重复的那条，不制造两个同名卡片
-fn repoint_app(conn: &Connection, from: &str, to: &str) -> AppResult<()> {
-    let exists: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM apps WHERE target = ?1",
-            params![from],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if exists.is_some() {
-        conn.execute("DELETE FROM apps WHERE target = ?1", params![to])?;
-    } else {
-        conn.execute(
-            "UPDATE apps SET target = ?1 WHERE target = ?2",
-            params![from, to],
-        )?;
-    }
-    Ok(())
 }
 
 /// 只删被搬空的分类目录，非空一律留着；顺带把只剩这些空目录的「桌面整理」也收掉
@@ -677,54 +611,6 @@ pub(crate) fn match_category(name: &str, ext: &str, rules: &[DesktopRule]) -> St
     "其他".to_string()
 }
 
-/// 登记或更新一个桌面程序。同一个程序在两种整理模式下写法不一样：只登记时存的是快捷方式
-/// 解析出来的真实目标，搬进归档后存的是那条 .lnk 的新路径。所以「是不是同一条」要把这几个
-/// 写法一起查（`aliases` 带上桌面原路径和解析目标）：命中就改那一行、连 target 一起改过来，
-/// 不再插第二条 —— 否则改一下勾选再整理一次，页面上就多出一个一模一样的图标。
-fn upsert_app_from_desktop(
-    conn: &Connection,
-    name: &str,
-    target: &str,
-    aliases: &[String],
-    category: &str,
-    icon_path: Option<&str>,
-) -> AppResult<()> {
-    let cat_id = categories::get_categories(conn, "app")?
-        .into_iter()
-        .find(|c| c.name == category)
-        .map(|c| c.id);
-    let mut hits: Vec<i64> = Vec::new();
-    for key in std::iter::once(target).chain(aliases.iter().map(String::as_str)) {
-        if let Some(id) = conn
-            .query_row("SELECT id FROM apps WHERE target = ?1", params![key], |r| r.get(0))
-            .optional()?
-        {
-            hits.push(id);
-        }
-    }
-    hits.sort_unstable();
-    hits.dedup();
-    match hits.first() {
-        // 老库里万一已经有好几条，只改最早的那条，剩下的交给用户自己删，不偷偷动他的东西。
-        // icon_path 用 COALESCE：这一轮没抽到图标（快捷方式指向的程序被挪走、U 盘没插）
-        // 不该把以前抽好存着的那张抹掉 —— 抹了卡片就退化成字母块，看着像图标丢了。
-        Some(id) => {
-            conn.execute(
-                "UPDATE apps SET name = ?1, category_id = ?2, source = 'desktop',
-                 icon_path = COALESCE(?3, icon_path), target = ?4 WHERE id = ?5",
-                params![name, cat_id, icon_path, target, id],
-            )?;
-        }
-        None => {
-            conn.execute(
-                "INSERT INTO apps (name, target, category_id, source, icon_path) VALUES (?1, ?2, ?3, 'desktop', ?4)",
-                params![name, target, cat_id, icon_path],
-            )?;
-        }
-    }
-    Ok(())
-}
-
 fn map_organize_log(r: &Row) -> rusqlite::Result<OrganizeLog> {
     let reverted: i64 = r.get(5)?;
     Ok(OrganizeLog {
@@ -788,12 +674,10 @@ mod tests {
         }
     }
 
-    fn plan(path: &Path, category: &str, skip_move: Option<bool>) -> OrganizePlan {
+    fn plan(path: &Path, category: &str) -> OrganizePlan {
         OrganizePlan {
             path: s(path),
             category: category.to_string(),
-            icon_path: None,
-            skip_move,
         }
     }
 
@@ -1037,31 +921,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 整理只动文件和自己的流水：`apps` 是「应用」页的表，桌面那种大杂烩不该进去
     #[test]
-    fn organize_moves_files_into_category_dirs_and_registers_them() {
+    fn organize_moves_files_into_category_dirs_and_leaves_the_launcher_alone() {
         let desktop = sandbox("organize");
         let pdf = touch(&desktop, "报告.pdf");
         let txt = touch(&desktop, "笔记.txt");
         let c = conn();
         c.execute("INSERT INTO categories (name, type) VALUES ('文档','app')", []).unwrap();
 
-        let logs = organize_into(
-            &c,
-            &[plan(&pdf, "文档", None), plan(&txt, "其他", None)],
-            &desktop,
-        )
-        .unwrap();
+        let logs = organize_into(&c, &[plan(&pdf, "文档"), plan(&txt, "其他")], &desktop).unwrap();
 
         assert_eq!(logs.len(), 2);
         let moved_pdf = desktop.join("桌面整理").join("文档").join("报告.pdf");
-        let moved_txt = desktop.join("桌面整理").join("其他").join("笔记.txt");
         assert!(moved_pdf.exists(), "文件要落到 桌面整理/<分类>/ 下");
         assert!(!pdf.exists(), "原位置该空出来");
-        assert_eq!(targets(&c), vec![s(&moved_pdf), s(&moved_txt)]);
-        let rows = get_apps(&c).unwrap();
-        assert_eq!(rows[0].category_id, Some(1), "分类按名字对上库里那条");
-        assert_eq!(rows[0].source, "desktop");
-        assert_eq!(rows[1].category_id, None, "「其他」没建分类就是未分类");
+        assert!(desktop.join("桌面整理").join("其他").join("笔记.txt").exists());
+        assert_eq!(targets(&c), Vec::<String>::new(), "整理不该往「应用」里登记任何东西");
+        let logged: i64 = c
+            .query_row("SELECT COUNT(*) FROM organize_logs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(logged, 2, "搬了的都得留下可撤销的流水");
         assert!(!logs[0].reverted);
         let _ = std::fs::remove_dir_all(&desktop);
     }
@@ -1075,7 +955,7 @@ mod tests {
         let pdf = touch(&desktop, "报告.pdf");
         let c = conn();
 
-        let logs = organize_into(&c, &[plan(&pdf, "文档", None)], &desktop).unwrap();
+        let logs = organize_into(&c, &[plan(&pdf, "文档")], &desktop).unwrap();
 
         assert_eq!(logs[0].to_path.as_deref(), Some(s(&cat.join("报告 (1).pdf")).as_str()));
         assert!(keeper.exists(), "归档里原来那份不能被动掉");
@@ -1084,29 +964,11 @@ mod tests {
     }
 
     #[test]
-    fn register_only_plan_leaves_the_file_on_the_desktop() {
-        let desktop = sandbox("register-only");
-        let pdf = touch(&desktop, "报告.pdf");
-        let c = conn();
-
-        let logs = organize_into(&c, &[plan(&pdf, "文档", Some(true))], &desktop).unwrap();
-
-        assert!(logs.is_empty());
-        assert!(pdf.exists(), "只登记不该搬走桌面文件");
-        assert_eq!(targets(&c), vec![s(&pdf)]);
-        let logged: i64 = c
-            .query_row("SELECT COUNT(*) FROM organize_logs", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(logged, 0, "没搬就不该留下可撤销的流水");
-        let _ = std::fs::remove_dir_all(&desktop);
-    }
-
-    #[test]
-    fn revert_puts_everything_back_and_repoints_the_launcher() {
+    fn revert_puts_everything_back_and_prunes_the_empty_dirs() {
         let desktop = sandbox("revert");
         let pdf = touch(&desktop, "报告.pdf");
         let c = conn();
-        organize_into(&c, &[plan(&pdf, "文档", None)], &desktop).unwrap();
+        organize_into(&c, &[plan(&pdf, "文档")], &desktop).unwrap();
         let moved = desktop.join("桌面整理").join("文档").join("报告.pdf");
         assert!(moved.exists());
 
@@ -1117,7 +979,6 @@ mod tests {
             !desktop.join("桌面整理").exists(),
             "被搬空的分类目录和只剩空目录的「桌面整理」都该收掉"
         );
-        assert_eq!(targets(&c), vec![s(&pdf)], "启动器不能留成指向归档的死链");
         assert_eq!(revert_organize(&c, None).unwrap(), 0, "撤销过的流水不该再算一遍");
         let _ = std::fs::remove_dir_all(&desktop);
     }
@@ -1130,11 +991,6 @@ mod tests {
         let to = desktop.join("桌面整理").join("文档").join("报告.pdf");
         let c = conn();
         c.execute(
-            "INSERT INTO apps (name, target, source) VALUES ('报告', ?1, 'desktop')",
-            params![s(&to)],
-        )
-        .unwrap();
-        c.execute(
             "INSERT INTO organize_logs (file_name, from_path, to_path) VALUES ('报告.pdf', ?1, ?2)",
             params![s(&from), s(&to)],
         )
@@ -1146,19 +1002,7 @@ mod tests {
             .query_row("SELECT reverted FROM organize_logs WHERE id = ?1", params![id], |r| r.get(0))
             .unwrap();
         assert_eq!(reverted, 1, "状态还是得补记，否则每次恢复都白跑一遍");
-        assert_eq!(targets(&c), vec![s(&from)], "启动器要跟回原位置");
         let _ = std::fs::remove_dir_all(&desktop);
-    }
-
-    #[test]
-    fn repoint_drops_the_archive_row_when_home_already_has_one() {
-        let c = conn();
-        c.execute("INSERT INTO apps (name, target) VALUES ('原位','C:/d/报告.pdf')", []).unwrap();
-        c.execute("INSERT INTO apps (name, target) VALUES ('归档','C:/d/桌面整理/文档/报告.pdf')", []).unwrap();
-
-        repoint_app(&c, "C:/d/报告.pdf", "C:/d/桌面整理/文档/报告.pdf").unwrap();
-
-        assert_eq!(targets(&c), vec!["C:/d/报告.pdf".to_string()], "同一份文件只该留一张卡片");
     }
 
     #[test]
@@ -1177,119 +1021,6 @@ mod tests {
         assert!(full_cat.exists(), "非空目录一律留着");
         assert!(base.exists(), "归档根目录里还有东西就不该动");
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn registering_the_same_target_twice_updates_instead_of_doubling_up() {
-        let c = conn();
-        c.execute("INSERT INTO categories (name, type) VALUES ('文档','app')", []).unwrap();
-        c.execute("INSERT INTO categories (name, type) VALUES ('办公','app')", []).unwrap();
-
-        upsert_app_from_desktop(&c, "报告", "C:/x/报告.pdf", &[], "文档", Some("i.png")).unwrap();
-        upsert_app_from_desktop(&c, "报告 修订", "C:/x/报告.pdf", &[], "办公", None).unwrap();
-
-        let rows = get_apps(&c).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].name, "报告 修订");
-        assert_eq!(rows[0].category_id, Some(2));
-    }
-
-    /// 换个勾选再整理一次，不该多出一张一模一样的卡片
-    #[test]
-    fn organizing_twice_with_different_modes_keeps_one_card() {
-        let desktop = sandbox("organize-twice");
-        let tool = touch(&desktop, "Tool.exe");
-        let c = conn();
-
-        organize_into(&c, &[plan(&tool, "其他", Some(true))], &desktop).unwrap();
-        let only = targets(&c);
-        assert_eq!(only.len(), 1, "只登记一次就该有一条");
-        assert_eq!(only[0], s(&tool), "只登记时记的是桌面上那个文件");
-
-        // 第二次改成「移动并添加」：文件搬走了，同一条要跟着改路径，而不是再插一条
-        organize_into(&c, &[plan(&tool, "其他", Some(false))], &desktop).unwrap();
-        let rows = get_apps(&c).unwrap();
-        assert_eq!(rows.len(), 1, "换了模式也不该出现第二张卡片");
-        assert_eq!(
-            rows[0].target,
-            s(&desktop.join("桌面整理").join("其他").join("Tool.exe")),
-            "卡片要跟去归档后的新位置"
-        );
-        let _ = std::fs::remove_dir_all(&desktop);
-    }
-
-    /// 别名命中时（归档里的 .lnk 与它解析出的 exe 是同一个程序）改最早那条，并换成新写法
-    #[test]
-    fn an_alias_match_reuses_the_existing_row() {
-        let c = conn();
-        upsert_app_from_desktop(&c, "App.lnk", "C:/archived/App.lnk", &[], "其他", None).unwrap();
-        upsert_app_from_desktop(
-            &c,
-            "App.lnk",
-            "C:/real/App.exe",
-            &["C:/archived/App.lnk".to_string()],
-            "其他",
-            None,
-        )
-        .unwrap();
-
-        let rows = get_apps(&c).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].target, "C:/real/App.exe");
-    }
-
-    /// 这一轮没抽到图标（目标被卸载、U 盘没插）不该把以前存着的那张抹掉
-    #[test]
-    fn a_failed_extraction_keeps_the_stored_icon() {
-        let c = conn();
-        upsert_app_from_desktop(&c, "U盾工具", "C:/u/tool.exe", &[], "其他", Some("C:/icons/a.png")).unwrap();
-        upsert_app_from_desktop(&c, "U盾工具", "C:/u/tool.exe", &[], "其他", None).unwrap();
-
-        let rows = get_apps(&c).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(
-            rows[0].icon_path.as_deref(),
-            Some("C:/icons/a.png"),
-            "抽图标失败不该把已有图标清空"
-        );
-
-        upsert_app_from_desktop(&c, "U盾工具", "C:/u/tool.exe", &[], "其他", Some("C:/icons/b.png")).unwrap();
-        assert_eq!(
-            get_apps(&c).unwrap()[0].icon_path.as_deref(),
-            Some("C:/icons/b.png"),
-            "这次抽到了，还是要换成新的"
-        );
-    }
-
-    /// 「只处理新增」的判断依据：.lnk 自身或它解析出的目标，任一种写法在启动器里都算已登记
-    #[test]
-    fn already_registered_items_are_recognized_either_way() {
-        let item = |path: &str, target: &str| DesktopItem {
-            name: "x".into(),
-            path: path.into(),
-            target: target.into(),
-            is_lnk: true,
-            category: "其他".into(),
-            icon_path: None,
-            registered: false,
-        };
-        let mut items = vec![
-            item(r"C:\d\A.lnk", r"C:\app\a.exe"),
-            item(r"C:\d\B.lnk", r"C:\app\b.exe"),
-            item(r"C:\d\C.lnk", r"C:\app\c.exe"),
-        ];
-        let known = ["c:\\d\\a.lnk", "C:\\APP\\b.exe"]
-            .into_iter()
-            .map(|s| s.to_lowercase())
-            .collect::<std::collections::HashSet<_>>();
-
-        mark_registered(&mut items, &known);
-
-        assert_eq!(
-            items.iter().map(|i| i.registered).collect::<Vec<_>>(),
-            vec![true, true, false],
-            "大小写不同、存的是 .lnk 还是 exe，都该认出来"
-        );
     }
 
     #[test]

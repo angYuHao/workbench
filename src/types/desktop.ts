@@ -13,7 +13,7 @@ export interface AppEntry {
   useCount: number;
 }
 
-/** 扫描桌面看到的待整理项（还没入库） */
+/** 扫描桌面看到的一项（还没整理） */
 export interface DesktopItem {
   name: string;
   path: string;
@@ -21,17 +21,12 @@ export interface DesktopItem {
   isLnk: boolean;
   category: string;
   iconPath: string | null;
-  /** 启动器里已经有这一条了，「只处理新增」靠它跳过 */
-  registered: boolean;
 }
 
-/** 确认整理时提交的一条计划 */
+/** 确认整理时提交的一条计划：整理只搬文件，不往「应用」里登记任何东西 */
 export interface OrganizePlan {
   path: string;
   category: string;
-  iconPath: string | null;
-  /** 只登记进启动器、不搬桌面文件 */
-  skipMove?: boolean;
 }
 
 /** 整理流水，「恢复整理」靠它把文件搬回原位 */
