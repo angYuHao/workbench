@@ -9,10 +9,10 @@ Tauri 2 + React 18 + Rust + SQLite，**没有服务端、没有账号、没有�
 
 ## 装上就能用
 
-到 [Releases](../../releases) 下其中一个：
+到 [Releases](../../releases) 下其中一个（文件名以 `workbench_` 开头：GitHub 会抹掉资产名里的非 ASCII 字符，所以安装包不带中文产品名，装出来的程序名、开始菜单项还是「个人工作台」）：
 
-- **`…-setup.exe`** —— 单文件安装程序，双击装；静默安装加 `/S`。
-- **`….msi`** —— Windows Installer 包，`msiexec /i 包名.msi /qn` 可以无人值守部署。
+- **`workbench_*_x64-setup.exe`** —— 单文件安装程序，双击装；静默安装加 `/S`。
+- **`workbench_*_x64_zh-CN.msi`** —— Windows Installer 包，`msiexec /i 包名.msi /qn` 可以无人值守部署。
 
 装机需要 Microsoft Edge WebView2 运行时（Win10 1803+ 和 Win11 自带）。卸载**不会删数据和设置**，它们还在 `%APPDATA%\workbench\`，重装就接着用；要清干净自己删那个目录。
 

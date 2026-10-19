@@ -42,6 +42,8 @@ npx tauri build -d --no-bundle     # 产物在 src-tauri\target\debug\ 下
 
 推一个 `v*` 的 tag 就触发 [.github/workflows/release.yml](.github/workflows/release.yml)：runner 上装依赖、`tauri build`、然后建 Release 并带上现场算的 SHA-256。tag 名字里带横杠的（`v1.0.0-rc1` 这种）只跑不发布，用来试。
 
+上传前工作流会把安装包名开头的中文产品名换成 `workbench`：**GitHub 会抹掉资产名里的非 ASCII 字符**（`个人工作台_1.0.1_x64-setup.exe` 传上去只剩 `_1.0.1_x64-setup.exe`），不改名的话 Release 正文里的文件名和实际下载到的对不上。`bundle.artifactName` 这个配置键在 CLI 2.12.1 里还没有，所以只能在上传前动手。
+
 ## 改完必须跑的门
 
 ```bash
