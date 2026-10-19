@@ -18,6 +18,9 @@ const blankRule: DesktopRule = {
   sort: 0,
 };
 
+/** 后端 match_category 命中不到规则时回的就是这个字，两边得一致 */
+const FALLBACK = "其他";
+
 /**
  * 桌面整理工具：只管桌面上那一堆文件。三个动作——扫一遍归位、搬回原处、改规则。
  * 卡片和分类在「应用」页，那儿只读开始菜单，不碰这里的规则。
@@ -37,18 +40,15 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
     loadRules().catch((e) => message.error(String(e)));
   }, []);
 
-  const categoryNames = useMemo(() => {
-    // 整理桌面的目标分类就是分类规则里那些名字：这张表才决定文件挪去哪，
-    // 分类表里可能还有只在「应用」页用着的名字，摆在这儿是干扰
-    const names = [...new Set(rules.map((r) => r.category))];
-    return names;
-  }, [rules]);
-  /** 规则命中不到的一律落「其他」，那一行不在规则名里也得能显出来，不然下拉显示「请选择」、实际却会挪进「其他」 */
-  const optionsFor = (current: string) =>
-    (categoryNames.includes(current) ? categoryNames : [...categoryNames, current]).map((n) => ({
-      label: n,
+  const categoryOptions = useMemo(() => {
+    // 目标分类就是分类规则里那些名字（按规则排序去重）；「其他」是规则都没命中时的去向，
+    // 每行都给这一项、并标清楚它不是规则，免得数下来对不上
+    const names = [...new Set(rules.map((r) => r.category.trim()).filter(Boolean))];
+    return [...names, FALLBACK].map((n) => ({
+      label: n === FALLBACK ? `${n}（规则没命中）` : n,
       value: n,
     }));
+  }, [rules]);
   const newPlans = useMemo(() => (onlyNew ? plans.filter((p) => !p.registered) : plans), [plans, onlyNew]);
   const skippedPlans = plans.length - newPlans.length;
 
@@ -180,7 +180,7 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
                   size="small"
                   style={{ width: 130 }}
                   value={record.category}
-                  options={optionsFor(record.category)}
+                  options={categoryOptions}
                   onChange={(v) =>
                     setPlans((prev) =>
                       prev.map((p) => (p.path === record.path ? { ...p, category: v as string } : p)),
@@ -192,6 +192,10 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
           ]}
         />
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="label">
+            目标分类就是分类规则里的 {categoryOptions.length - 1} 个分类名；最后那个
+            <b>「{FALLBACK}（规则没命中）」</b>不是规则，是这一项一条规则都没撞上时的去向。
+          </span>
           <Checkbox
             checked={onlyNew}
             onChange={setOnlyNew}
