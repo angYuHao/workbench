@@ -585,6 +585,46 @@ mod tests {
         );
     }
 
+    /// 真机核对第二半：过滤名单在这台机器上到底挡不挡东西。
+    /// 关开关 → 系统应用回来了；拿其中一个名字进名单、照拖动那样删掉卡片 → 再同步不该回来。
+    #[test]
+    #[ignore]
+    fn the_filter_list_actually_blocks_on_this_machine() {
+        use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        }
+        let c = conn();
+
+        let on_first = sync_installed(&c).unwrap();
+        assert!(on_first.filtered > 0, "默认开着系统应用过滤却一个都没挡：{on_first:?}");
+        crate::services::settings::set_setting(&c, SYSTEM_SWITCH, "0").unwrap();
+        let system_off = sync_installed(&c).unwrap();
+        assert_eq!(system_off.scanned, on_first.scanned, "开关不该改变扫到的总数");
+        println!(
+            "默认开：收 {} / 挡 {}；关掉开关后又收回 {} 个系统应用",
+            on_first.inserted, on_first.filtered, system_off.inserted
+        );
+        assert!(system_off.inserted > 0, "关掉开关一个都没多出来，说明那条过滤没生效");
+
+        let (vid, victim): (i64, String) = c
+            .query_row("SELECT id, name FROM apps LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        let before = system_off.total;
+        add_app_filter(&c, &victim).unwrap();
+        crate::services::desktop::delete_app(&c, vid).unwrap();
+        let after = sync_installed(&c).unwrap();
+        let still: i64 = c
+            .query_row("SELECT COUNT(*) FROM apps WHERE name = ?1", params![victim], |r| r.get(0))
+            .unwrap();
+        println!(
+            "把「{victim}」加进名单再同步：库里 {before} → {}，本次收 {}、挡 {}",
+            after.total, after.inserted, after.filtered
+        );
+        assert_eq!(still, 0, "名单里那个又被收回来了，过滤没生效");
+        assert!(after.filtered >= 1, "{after:?}");
+    }
+
     #[test]
     fn only_a_launchable_target_counts() {
         assert!(launchable("http://localhost:9200/"), "网址目标算可启动");

@@ -143,20 +143,21 @@
   color: var(--color-danger);
 }
 
-/* 工具栏上的「拖来过滤」落点：平时就一个虚线药丸，卡片拖进来才亮起来，跟分类落点同一套语言 */
+/* 分类栏底下的「拖来过滤」落点：平时就一个灰色图标，卡片拖进来才亮起来，跟分类落点同一套语言 */
 .filter-drop {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  margin-top: 10px;
   border: 1px dashed var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   color: var(--color-text-secondary);
-  font-size: 12px;
-  white-space: nowrap;
 }
 
 .filter-drop.on {
+  border-style: solid;
   border-color: var(--color-primary);
   background: var(--color-primary-soft);
   color: var(--color-primary);

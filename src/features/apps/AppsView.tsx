@@ -242,29 +242,6 @@ export default function AppsView() {
           onChange={setKeyword}
         />
         <div className="toolbar-spacer" />
-        <Tooltip title="把一张卡片拖进来：这个名字加进过滤名单，卡片同时移除，以后同步不再收它。名单在 设置 → 应用过滤 里能改能删，那里还有试算。">
-          <div
-            className={filterOver ? "filter-drop on" : "filter-drop"}
-            aria-label="拖到此处过滤"
-            onDragOver={(e) => {
-              if (!carriesItem(e)) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "copy";
-              if (!filterOver) setFilterOver(true);
-            }}
-            onDragLeave={() => setFilterOver(false)}
-            onDrop={(e) => {
-              if (!carriesItem(e)) return;
-              e.preventDefault();
-              setFilterOver(false);
-              const id = Number(e.dataTransfer.getData(ITEM_MIME));
-              if (Number.isInteger(id) && id > 0) void dropToFilter(id);
-            }}
-          >
-            <Filter size={14} strokeWidth={1.6} />
-            拖来过滤
-          </div>
-        </Tooltip>
         {selection.active ? (
           <SelectionBar
             selection={selection}
@@ -307,6 +284,30 @@ export default function AppsView() {
             onDeleteMany={deleteCats}
             onDelete={deleteCat}
           />
+          <Tooltip title="把一张卡片拖到这里：名字进过滤名单，卡片当场消失，以后同步不再收它。名单在 设置 → 应用过滤 里能改能删，那里还能试算挡了谁。" placement="right">
+            <div
+              className={filterOver ? "filter-drop on" : "filter-drop"}
+              aria-label="拖到此处过滤"
+              onDragOver={(e) => {
+                if (!carriesItem(e)) return;
+                e.preventDefault();
+                // 卡片那边 effectAllowed 写的是 move，这里必须也用 move：
+                // 两个不一致时 Chrome 直接把这次拖动判成 none，drop 根本不会发出来
+                e.dataTransfer.dropEffect = "move";
+                if (!filterOver) setFilterOver(true);
+              }}
+              onDragLeave={() => setFilterOver(false)}
+              onDrop={(e) => {
+                if (!carriesItem(e)) return;
+                e.preventDefault();
+                setFilterOver(false);
+                const id = Number(e.dataTransfer.getData(ITEM_MIME));
+                if (Number.isInteger(id) && id > 0) void dropToFilter(id);
+              }}
+            >
+              <Filter size={15} strokeWidth={1.6} />
+            </div>
+          </Tooltip>
         </div>
         <div className="content-pane">
           <AppIconGrid
