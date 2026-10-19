@@ -143,16 +143,31 @@
   color: var(--color-danger);
 }
 
-/* 分类栏底下的「拖来过滤」落点：平时就一个灰色图标，卡片拖进来才亮起来，跟分类落点同一套语言 */
+/* 「应用」页的分类栏：过滤落点钉在这一栏最底下，分类多到要滚动时也留在视线里 */
+.apps-side {
+  display: flex;
+  flex-direction: column;
+}
+
+.apps-filter-slot {
+  display: flex;
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  padding-top: 10px;
+  background: var(--color-bg);
+}
+
+/* 拖来过滤的落点：一块够大的图标砖，平时虚线灰边，卡片拖进来才亮起来（和分类落点同一套语言） */
 .filter-drop {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 26px;
-  margin-top: 10px;
+  width: 46px;
+  height: 46px;
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-control);
+  background: transparent;
   color: var(--color-text-secondary);
 }
 
