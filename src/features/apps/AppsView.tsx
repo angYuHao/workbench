@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, Search, Sparkles, Square } from "lucide-react";
+import { Filter, Plus, RefreshCw, Search, Sparkles, Square } from "lucide-react";
 import { useDesktopStore } from "../../stores/desktop";
-import { syncInstalledApps, saveApp } from "../../api/desktop";
+import { addAppFilter, syncInstalledApps, saveApp } from "../../api/desktop";
 import { deleteCategories, deleteCategory } from "../../api/categories";
 import type { CategoryNode } from "../../shared/CategoryTree";
-import CategoryTree from "../../shared/CategoryTree";
+import CategoryTree, { ITEM_MIME } from "../../shared/CategoryTree";
 import { useCategoryScaffold } from "../../shared/useCategoryScaffold";
 import AppIconGrid from "./AppIconGrid";
 import SelectionBar from "../../shared/SelectionBar";
 import SmartCategorizeModal from "../../shared/SmartCategorizeModal";
 import { useIdSelection } from "../../shared/useIdSelection";
 import { useSmartCategorize } from "../../shared/useSmartCategorize";
-import { Button, Checkbox, Form, FormItem, Input, Modal, ModalConfirm, Select, Space, message, useForm } from "../../ui";
+import { Button, Checkbox, Form, FormItem, Input, Modal, ModalConfirm, Select, Space, Tooltip, message, useForm } from "../../ui";
 import { stripExt } from "../../utils/fileKind";
 import type { AppEntry } from "../../types";
 
@@ -185,6 +185,37 @@ export default function AppsView() {
     }
   };
 
+  const [filterOver, setFilterOver] = useState(false);
+
+  /** 拖过来的只认自家卡片；从资源管理器拖文件进来仍由 App.tsx 那层吞掉 */
+  const carriesItem = (e: React.DragEvent) => e.dataTransfer.types.includes(ITEM_MIME);
+
+  /**
+   * 拖一张卡片到「拖来过滤」上：把这个名字加进过滤名单，同时删掉卡片。
+   * 模式取去扩展名的显示名（`Loomy.lnk` → `Loomy`），装到新版本也还认得；
+   * 名单本身在 设置 → 应用过滤 里能改能删，也能试算它到底挡了谁。
+   */
+  const dropToFilter = async (id: number) => {
+    const app = apps.find((a) => a.id === id);
+    if (!app) return;
+    const pattern = stripExt(app.name).trim();
+    if (!pattern) {
+      message.error("这张卡片的名字是空的，过滤了也挡不住东西");
+      return;
+    }
+    try {
+      const added = await addAppFilter(pattern);
+      await removeApp(app.id);
+      message.success(
+        added
+          ? `已过滤「${pattern}」：卡片移除了，以后同步不再收它（想改想去 设置 → 应用过滤）`
+          : `「${pattern}」本来就在过滤名单里，卡片移除了`
+      );
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
   const handleDelete = (ids: number[]) => {
     if (ids.length === 0) return;
     ModalConfirm({
@@ -211,6 +242,29 @@ export default function AppsView() {
           onChange={setKeyword}
         />
         <div className="toolbar-spacer" />
+        <Tooltip title="把一张卡片拖进来：这个名字加进过滤名单，卡片同时移除，以后同步不再收它。名单在 设置 → 应用过滤 里能改能删，那里还有试算。">
+          <div
+            className={filterOver ? "filter-drop on" : "filter-drop"}
+            aria-label="拖到此处过滤"
+            onDragOver={(e) => {
+              if (!carriesItem(e)) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+              if (!filterOver) setFilterOver(true);
+            }}
+            onDragLeave={() => setFilterOver(false)}
+            onDrop={(e) => {
+              if (!carriesItem(e)) return;
+              e.preventDefault();
+              setFilterOver(false);
+              const id = Number(e.dataTransfer.getData(ITEM_MIME));
+              if (Number.isInteger(id) && id > 0) void dropToFilter(id);
+            }}
+          >
+            <Filter size={14} strokeWidth={1.6} />
+            拖来过滤
+          </div>
+        </Tooltip>
         {selection.active ? (
           <SelectionBar
             selection={selection}
