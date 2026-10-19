@@ -10,6 +10,21 @@ mod win;
 use tauri::Manager;
 
 pub fn run() {
+    let context = tauri::generate_context!();
+
+    // 只允许一个实例：第二个进程刚起来就把现有窗口叫到前面然后退出。
+    // 窗口收进托盘后再双击图标，不然会开出第二个窗口、第二个托盘图标，还会去抢注同一个热键
+    let title = context
+        .config()
+        .app
+        .windows
+        .first()
+        .map(|window| window.title.clone())
+        .unwrap_or_default();
+    if !win::single_instance::claim_or_wake_existing(&title) {
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         // 唤醒热键只在这儿挂一个回调，真正的注册由前端在启动后调 async 命令做：
@@ -142,6 +157,6 @@ pub fn run() {
             commands::totp::import_totp_backup,
             commands::screen::capture_screen
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running workbench");
 }

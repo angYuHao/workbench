@@ -16,6 +16,8 @@ Tauri 2 + React 18 + Rust + SQLite，**没有服务端、没有账号、没有�
 
 装机需要 Microsoft Edge WebView2 运行时（Win10 1803+ 和 Win11 自带）。卸载**不会删数据和设置**，它们还在 `%APPDATA%\workbench\`，重装就接着用；要清干净自己删那个目录。
 
+**同时只跑一个实例**：窗口收进托盘后再双击图标，不会开出第二个窗口，而是把在跑的那个叫到眼前（跟唤醒快捷键一个效果）。
+
 从源码跑、以及怎么打包，看 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 桌面整理（打开就是这页）

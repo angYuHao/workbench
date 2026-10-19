@@ -5,3 +5,4 @@ pub mod icon;
 pub mod lnk;
 pub mod screen;
 pub mod shell;
+pub mod single_instance;
