@@ -158,24 +158,28 @@
   background: var(--color-bg);
 }
 
-/* 拖来过滤的落点：一块够大的图标砖，平时虚线灰边，卡片拖进来才亮起来（和分类落点同一套语言） */
+/* 拖来过滤的落点：铺满这一栏的宽，底色用主色的浅层（和工具页那个扫码入口一套配色），
+   悬停描边、拖进来才整块亮起。都用的是带透明度的 token，深色模式下自己就压暗了 */
 .filter-drop {
   display: flex;
+  flex: 1;
   align-items: center;
   justify-content: center;
-  width: 46px;
   height: 46px;
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--color-text-secondary);
+  background: var(--color-primary-faint);
+  color: var(--color-primary);
+}
+
+.filter-drop:hover {
+  border-color: var(--color-primary);
 }
 
 .filter-drop.on {
   border-style: solid;
   border-color: var(--color-primary);
   background: var(--color-primary-soft);
-  color: var(--color-primary);
   box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 
