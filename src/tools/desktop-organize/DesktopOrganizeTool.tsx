@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ListFilter, Undo2, Wand2 } from "lucide-react";
 import { organizeDesktop, revertOrganize, scanDesktop } from "../../api/desktop";
 import { useSettingsStore } from "../../stores/settings";
-import { Button, Empty, Modal, ModalConfirm, Select, Space, Spin, Table, message, pressable } from "../../ui";
+import { Button, Checkbox, Empty, Modal, ModalConfirm, Select, Space, Spin, Table, message, pressable } from "../../ui";
 import IconWithFallback from "../../shared/IconWithFallback";
 import { stripExt } from "../../utils/fileKind";
 import RulesSection from "./RulesSection";
@@ -22,7 +22,7 @@ const blankRule: DesktopRule = {
 /**
  * 桌面整理工具：外壳跟原来那一屏一致 —— 工具栏 + 左边分类栏 + 右边内容区。
  * 打开就扫一遍桌面，扫出来的东西直接铺在内容区，左边按分类规则给它们分组计数、点一下筛。
- * 三个动作按钮都在工具栏上：一键整理（重新扫 + 确认执行）、恢复整理、分类规则。
+ * 三个动作按钮都在工具栏上：一键整理（重新扫 + 逐条勾要不要移动）、恢复整理、分类规则。
  */
 export default function DesktopOrganizeTool({ onBack }: ToolProps) {
   const { rules, loadRules } = useSettingsStore();
@@ -33,6 +33,8 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [edit, setEdit] = useState<DesktopRule | null>(null);
   const [reverting, setReverting] = useState(false);
+  /** 确认窗口里勾「要移动」的项：按 path 记，改分类不会把勾弄丢。打开时默认全勾 */
+  const [movePaths, setMovePaths] = useState<Set<string>>(new Set());
 
   /** 扫桌面要解析 .lnk、抽图标，是这一屏唯一慢的一步；回扫到的东西，出错回 null */
   const scan = async (): Promise<DesktopItem[] | null> => {
@@ -84,17 +86,32 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
       message.info("桌面没有可整理的东西");
       return;
     }
+    setMovePaths(new Set(fresh.map((i) => i.path)));
     setOrganizeOpen(true);
   };
 
+  const moved = useMemo(() => items.filter((i) => movePaths.has(i.path)), [items, movePaths]);
+  const allChecked = items.length > 0 && moved.length === items.length;
+
   const handleOrganize = async () => {
-    if (!items.length) {
-      message.info("没有要整理的项");
+    if (!moved.length) {
+      message.info("一个都没勾：勾上要移动的文件，或点表头那个勾全选");
       return;
     }
-    const payload: OrganizePlan[] = items.map((p) => ({ path: p.path, category: p.category }));
-    const logs = await organizeDesktop(payload);
-    message.success(`已移动 ${logs.length} 个文件到「桌面整理」`);
+    const payload: OrganizePlan[] = moved.map((p) => ({ path: p.path, category: p.category }));
+    try {
+      const logs = await organizeDesktop(payload);
+      const left = items.length - moved.length;
+      message.success(
+        left > 0
+          ? `已移动 ${logs.length} 个文件到「桌面整理」，另外 ${left} 项原地不动`
+          : `已移动 ${logs.length} 个文件到「桌面整理」`,
+      );
+    } catch (e) {
+      // 文件被占用、目标目录没了都得当场说：窗口留着，改一下能直接重试
+      message.error(String(e));
+      return;
+    }
     setOrganizeOpen(false);
     await scan();
   };
@@ -121,6 +138,14 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
 
   const setCategory = (record: DesktopItem, category: string) =>
     setItems((prev) => prev.map((i) => (i.path === record.path ? { ...i, category } : i)));
+
+  const toggleMove = (path: string, on: boolean) =>
+    setMovePaths((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(path);
+      else next.delete(path);
+      return next;
+    });
 
   return (
     <div className="page">
@@ -203,7 +228,7 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
         open={organizeOpen}
         onCancel={() => setOrganizeOpen(false)}
         onOk={handleOrganize}
-        okText={`移动 ${items.length} 项`}
+        okText={`移动 ${moved.length} 项`}
         width={760}
       >
         <Table
@@ -212,6 +237,24 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
           size="small"
           scroll={{ y: 360 }}
           columns={[
+            {
+              // 表头那个勾是全选/全不选；没勾的项不进 payload，后端压根看不到它
+              title: (
+                <Checkbox
+                  checked={allChecked}
+                  ariaLabel="移动全部文件"
+                  onChange={(on) => setMovePaths(on ? new Set(items.map((i) => i.path)) : new Set())}
+                />
+              ),
+              width: 48,
+              render: (_: unknown, record: DesktopItem) => (
+                <Checkbox
+                  checked={movePaths.has(record.path)}
+                  ariaLabel={`移动 ${record.name}`}
+                  onChange={(on) => toggleMove(record.path, on)}
+                />
+              ),
+            },
             { title: "文件名", dataIndex: "name", ellipsis: true, render: (v: string) => stripExt(v) },
             {
               title: "当前位置",
@@ -237,8 +280,8 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
         />
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="label">
-            确定后这些文件会移进 <b>桌面\桌面整理\分类</b> 目录，同名会加 (1)(2)；移完点「恢复整理」原路搬回。
-            整理只搬文件，不会把它们登记到「应用」页。
+            勾上的才会移进 <b>桌面\桌面整理\分类</b> 目录，同名会加 (1)(2)；没勾的原地不动，也不会记进整理流水，
+            「恢复整理」不会碰它们。整理只搬文件，不会把它们登记到「应用」页。
           </span>
           <span className="label">
             只有撞上分类规则的项才会出现在这里：想多整理一类文件，去「分类规则」里加一条。
