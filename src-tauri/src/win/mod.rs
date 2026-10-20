@@ -3,6 +3,7 @@ pub mod desktop;
 pub mod dpapi;
 pub mod icon;
 pub mod lnk;
+pub mod registry;
 pub mod screen;
 pub mod shell;
 pub mod single_instance;

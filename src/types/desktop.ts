@@ -47,9 +47,9 @@ export interface DesktopRule {
   sort: number;
 }
 
-/** 一次开始菜单同步（或试算）的账单 */
+/** 一次注册表同步（或试算）的账单 */
 export interface SyncReport {
-  /** 开始菜单里扫出多少个可启动的快捷方式 */
+  /** 注册表里读到多少条卸载项（32/64 两份视图都算） */
   scanned: number;
   /** 本次收进来的；试算时是「会收进来的」 */
   inserted: number;
@@ -57,6 +57,8 @@ export interface SyncReport {
   filtered: number;
   /** 库里已经有的 */
   already: number;
+  /** 在注册表里挂着名字、但一条路径都认不出来的：不收卡片 */
+  unresolved: number;
   /** 库里现在一共多少张卡片 */
   total: number;
   /** 被挡掉的名字，最多 12 个 */

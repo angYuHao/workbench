@@ -14,8 +14,8 @@ import type { SyncReport } from "../../types";
 const SYSTEM_KEY = "filter_system_apps";
 
 /**
- * 应用过滤名单：开始菜单同步时命中就不收。
- * 一条模式就是个小写子串，程序名和路径两种写法里任意一段对上就算。
+ * 应用过滤名单：读注册表同步时命中就不收。
+ * 一条模式就是个小写子串，程序名、安装路径、注册表键名里任意一段对上就算。
  */
 export default function AppFilterSection() {
   const [patterns, setPatterns] = useState<string[]>([]);
@@ -98,9 +98,10 @@ export default function AppFilterSection() {
         <div className="settings-line-text">
           <div className="settings-line-title">过滤系统应用</div>
           <div className="settings-line-desc">
-            跳过 Windows 自己带的那些：Windows 目录底下的（资源管理器、控制面板、字符映射表）、
-            微软商店装的（WindowsApps），以及 附件 / Defender / Windows 安全中心 几个系统目录。
-            第三方装的（<b>Program Files (x86)\Windows Kits</b> 这种）不算系统应用，不会被挡。
+            注册表里那些「装过但不是给你用的东西」：明写自己是系统组件的、挂在别的程序底下的补丁、
+            名字带 更新程序 / 运行库 / redistributable 的附属程序，以及装在 Windows 目录里的
+            （含微软商店的 WindowsApps）。第三方软件不算：它们装在 Program Files 下，
+            图标虽然在 <b>C:\Windows\Installer</b> 里也不影响。
           </div>
         </div>
         <Switch checked={system} onChange={(on) => void handleToggleSystem(on)} />
@@ -146,12 +147,13 @@ export default function AppFilterSection() {
         <div className="settings-line-text">
           <div className="settings-line-title">试算一下</div>
           <div className="settings-line-desc">
-            拿现在的名单重扫一遍开始菜单，只报数不写库：看看会收多少、又挡了谁。
+            拿现在的名单重扫一遍注册表，只报数不写库：看看会收多少、又挡了谁。
           </div>
           {report && (
             <div className="settings-line-desc">
-              扫到 {report.scanned} 个 · 会收 {report.inserted} 个 · 被挡 {report.filtered} 个 ·
+              扫到 {report.scanned} 条 · 会收 {report.inserted} 个 · 被挡 {report.filtered} 个 ·
               库里已有 {report.already} 个，同步后一共 {report.total} 个
+              {report.unresolved > 0 && <> · {report.unresolved} 条认不出要打开什么，不收</>}
               {report.samples.length > 0 && (
                 <>
                   <br />

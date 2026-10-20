@@ -37,7 +37,18 @@ grep -c 'commands::' src/lib.rs
 
 `win::lnk::resolve_lnk`（`IShellLinkW`）和 `win::icon::extract_icon_to_png` 都不自己 `CoInitializeEx`，**线程没初始化 COM 就整片失败**：前者失败会悄悄退回「快捷方式自己的路径」（看着像解析出了 .lnk），后者失败就是每张卡片都没图。
 
-同步命令（非 async）跑在主线程上，tao/WebView2 已经把 COM 起好了，所以 `scan_desktop`、`sync_installed_apps` 在应用里是好的。**在测试线程里直接调这两个 API 会全灭**，要照着 `services::installed::tests::the_real_start_menu_yields_launchable_apps` 那样先 `CoInitializeEx(None, COINIT_APARTMENTTHREADED)`；那条 `#[ignore]` 的测试就是拿真开始菜单核对这一步的（本机跑出 124 个程序、124 张图标）。
+同步命令（非 async）跑在主线程上，tao/WebView2 已经把 COM 起好了，所以 `scan_desktop`、`sync_installed_apps` 在应用里是好的。**在测试线程里直接调这两个 API 会全灭**，要照着 `services::installed::tests::the_real_registry_lists_installed_programs` 那样先 `CoInitializeEx(None, COINIT_APARTMENTTHREADED)`；那条 `#[ignore]` 的测试就是拿真注册表核对这一步的（本机读出 353 条卸载项，收进来 61 个、抽到 60 张图标）。
+
+## 「应用」页的数据源是注册表，不是目录扫描
+
+`services/installed.rs` 读 `HKLM`/`HKCU` 的 `...\CurrentVersion\Uninstall` **四个视图**（32 位程序在 `WOW6432Node` 那份里，只读一份会漏一半），只读层在 `win/registry.rs`（`KEY_READ=131097`、`KEY_WOW64_32KEY=512`、`KEY_WOW64_64KEY=256`、`ERROR_NO_MORE_ITEMS=259` 这些常量是从本地 `windows-0.58.0` 源码里查的，改之前先 grep，别照记忆写）。
+
+注册表知道「装了什么」，说不准「怎么打开」，所以目标按四级找：`DisplayIcon` 里那个真存在的 exe → 开始菜单同名快捷方式 → 安装目录里同名的 exe → 卸载串里那个不是卸载器的 exe，全落空就用安装目录（点开是文件夹），一条路径都没有的算 `unresolved` 报数、不收卡片。两条踩过的坑：
+
+- **`DisplayIcon` 不能拿去判系统应用**——MSI 的图标全在 `C:\Windows\Installer` 里，按它判会把正经软件成片挡掉；系统判定只看安装目录和真目标。
+- **安装器不是程序本体**——`Docker Desktop Installer.exe`、`ProgramData\Package Cache\...\XxxSetup.exe` 点开来是重装/修复向导，`usable_exe` 一律不收这种路径。
+
+`hits` 匹配过滤模式时名字要比两份：折小写的原样名字（带括号和版本号，「7-Zip 23.01 (x64)」这种从卡片名照抄的模式要能命中）和只留字母数字的那份。
 
 ## 智能分类只有三步
 

@@ -33,9 +33,9 @@ const SECTIONS = [
     key: "appFilter",
     group: "应用",
     label: "应用过滤",
-    desc: "同步开始菜单时跳过系统应用，也能自己加模式",
+    desc: "同步注册表里的已安装程序时跳过系统组件，也能自己加模式",
     icon: Filter,
-    words: "过滤 屏蔽 忽略 系统应用 开始菜单 同步 名单 filter",
+    words: "过滤 屏蔽 忽略 系统应用 注册表 已安装 同步 名单 filter",
   },
   {
     key: "blacklist",

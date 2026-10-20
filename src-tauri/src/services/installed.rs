@@ -1,9 +1,14 @@
-//! 「应用」页的数据源：开始菜单里的快捷方式。
+//! 「应用」页的数据源：注册表里登记的已安装程序。
 //!
-//! 不用注册表的 `Uninstall` 键：那边 122 条里只有约 40 条有 `InstallLocation`，
-//! 其余的 `DisplayIcon` 常常指着卸载器图标（`…\uninstallerIcon.ico`、`X.exe,0`），
-//! 拿它当启动目标会有一大半点不动。开始菜单的快捷方式名字是给人看的、
-//! `.lnk` 又能解析出真 exe，图标也照桌面上那套抽法。
+//! `HKLM/HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall` 四个视图（两个 hive ×
+//! 32/64 位视图）是 Windows 自己记「装了什么」的地方：装过的程序一个都跑不掉，还带得到
+//! 版本和发行商；没装过的绿色版不在这里。
+//!
+//! 注册表的弱点在「怎么打开它」：`InstallLocation` 常常是空的，`DisplayIcon` 又经常指着
+//! 卸载器图标（`…\uninstallerIcon.ico`、`app.exe,0`）。所以启动目标按四级找：
+//! **DisplayIcon 里那个真存在的 exe → 开始菜单里同名快捷方式 → 安装目录里同名的 exe →
+//! 卸载串里那个不是卸载器的 exe**，全落空就用安装目录本身（点开是文件夹），
+//! 连目录都没有的算「找不到」，不收卡片、只在账单里报数。
 //!
 //! 同步之前先过一遍过滤名单（设置 → 应用过滤）：命中的一律不收。
 
@@ -15,6 +20,7 @@ use serde::Serialize;
 
 use crate::error::AppResult;
 use crate::services::desktop::{extract_icon, extension_of, get_icon_dir, launch_target};
+use crate::win::registry::{Arch, Hive, Key};
 
 /// 开始菜单本来就有多层厂商目录，给三层的量
 const MAX_DEPTH: usize = 3;
@@ -22,18 +28,21 @@ const MAX_DEPTH: usize = 3;
 const SAMPLES: usize = 12;
 /// 设置里那个「过滤系统应用」开关；没写过就当作开着
 const SYSTEM_SWITCH: &str = "filter_system_apps";
-
-struct Discovered {
-    name: String,
-    target: String,
-    lnk: String,
-}
+/// Windows 记「装了什么东西」的那把键
+const UNINSTALL_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
+/// 32 位程序装的在 WOW6432Node 那份视图里，只读一个视图会漏一半
+const VIEWS: [(Hive, Arch); 4] = [
+    (Hive::Local, Arch::Native),
+    (Hive::Local, Arch::Wow32),
+    (Hive::Current, Arch::Native),
+    (Hive::Current, Arch::Wow32),
+];
 
 /// 一次同步（或试算）的账单。界面照着它说话，不然「点了没反应」和「本来就没有新的」分不出来。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncReport {
-    /// 开始菜单里扫出多少个可启动的快捷方式
+    /// 注册表里读到多少条有名字的卸载项（32/64 两份都算在里面）
     pub scanned: usize,
     /// 本次收进来的（试算时是「会收进来的」）
     pub inserted: usize,
@@ -41,6 +50,8 @@ pub struct SyncReport {
     pub filtered: usize,
     /// 库里已经有的
     pub already: usize,
+    /// 一条路径都认不出来的：它在注册表里挂着名字，但不知道打开什么，不收卡片
+    pub unresolved: usize,
     /// 库里现在一共多少张卡片
     pub total: usize,
     /// 被挡掉的名字，最多 12 个
@@ -53,8 +64,53 @@ pub struct Filters {
     pub system: bool,
 }
 
-/// 扫一遍开始菜单，把没见过的应用收进启动器。只插不改：
-/// 用户改过的名字、手动归好的分类、抽好的图标都不该被一次同步抹掉。
+/// 注册表读出来的一条卸载项。测试直接手搭这个，不用碰真注册表
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Entry {
+    pub name: String,
+    pub version: String,
+    pub publisher: String,
+    pub install_location: String,
+    pub display_icon: String,
+    pub uninstall: String,
+    /// `HKLM\Software\...\Uninstall\{GUID}`，用来让被挡的项看得出是谁
+    pub reg_key: String,
+    pub system_component: bool,
+    /// 补丁/热修复：挂在别的程序底下的那种条目，不是一「个应用」
+    pub is_patch: bool,
+}
+
+/// 快捷方式索引里的一条：名字（已归一化）、.lnk 自己、解析出的真目标
+#[derive(Debug, Clone)]
+pub(crate) struct Shortcut {
+    pub key: String,
+    pub lnk: String,
+    pub target: String,
+}
+
+/// 一个条目的目标找到在第几级上——卡片点开是什么东西由它决定
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Found {
+    /// DisplayIcon 或安装目录/卸载串里那个 exe
+    Exe,
+    /// 开始菜单的同名快捷方式
+    Shortcut,
+    /// 只有安装目录：点开是文件夹
+    Folder,
+    /// 什么路径都没认出来
+    Nothing,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Resolved {
+    pub target: String,
+    /// 抽图标的候选，越靠前越像「桌面上看到的那张」
+    pub icons: Vec<String>,
+    pub found: Found,
+}
+
+/// 同步之前先过一遍过滤名单（设置 → 应用过滤）：命中的一律不收。
+/// 只插不改：用户改过的名字、手动归好的分类、抽好的图标都不该被一次同步抹掉。
 /// 删掉的卡片下次同步照样收回来——这一页是「本机装了什么」的镜子，不做拉黑名单。
 pub fn sync_installed(conn: &Connection) -> AppResult<SyncReport> {
     run(conn, false)
@@ -67,76 +123,262 @@ pub fn preview_installed(conn: &Connection) -> AppResult<SyncReport> {
 
 fn run(conn: &Connection, dry: bool) -> AppResult<SyncReport> {
     let icon_dir = get_icon_dir()?;
-    let roots = crate::win::desktop::all_program_menus()
-        .into_iter()
-        .map(PathBuf::from)
-        .collect::<Vec<_>>();
-    scan(conn, &roots, &icon_dir, dry)
+    let entries = read_entries();
+    let shortcuts = shortcut_index(
+        &crate::win::desktop::all_program_menus()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>(),
+    );
+    plan(conn, &entries, &shortcuts, &icon_dir, dry)
 }
 
-/// 真正干活的一层：目录和图标缓存都从外面进来，测试就能拿临时目录真跑一遍
-pub(crate) fn scan(
+/// 从四个视图把卸载项读出来。打不开的视图跳过，某一条读不动也跳过：
+/// 注册表里本来就有半截的项，不该因为它们放弃整页
+pub(crate) fn read_entries() -> Vec<Entry> {
+    let mut out = Vec::new();
+    for (hive, arch) in VIEWS {
+        let Some(root) = Key::open(hive, UNINSTALL_SUBKEY, arch) else {
+            continue;
+        };
+        for sub in root.child_names() {
+            let path = format!(r"{}\{}", UNINSTALL_SUBKEY, sub);
+            let Some(item) = Key::open(hive, &path, arch) else {
+                continue;
+            };
+            let text = |name: &str| item.string(name).unwrap_or_default().trim().to_string();
+            let name = text("DisplayName");
+            if name.is_empty() {
+                continue;
+            }
+            out.push(Entry {
+                version: text("DisplayVersion"),
+                publisher: text("Publisher"),
+                install_location: text("InstallLocation"),
+                display_icon: text("DisplayIcon"),
+                uninstall: item
+                    .string("UninstallString")
+                    .or_else(|| item.string("QuietUninstallString"))
+                    .unwrap_or_default(),
+                reg_key: item.path().to_string(),
+                system_component: item.dword("SystemComponent") == Some(1),
+                is_patch: !text("ParentKeyName").is_empty() || !text("ReleaseType").is_empty(),
+                name,
+            });
+        }
+    }
+    out
+}
+
+/// 把开始菜单收成一本「名字 → 快捷方式」的索引：注册表只管「装了什么」，
+/// 「怎么打开」它说不准，而快捷方式的名字是给人看的、又能解析出真 exe
+pub(crate) fn shortcut_index(roots: &[PathBuf]) -> Vec<Shortcut> {
+    let mut out = Vec::new();
+    for root in roots {
+        collect_shortcuts(root, 0, &mut out);
+    }
+    out
+}
+
+/// 真正干活的一层：条目、快捷方式索引、图标缓存都从外面进来，测试就能全程离线跑
+pub(crate) fn plan(
     conn: &Connection,
-    roots: &[PathBuf],
+    entries: &[Entry],
+    shortcuts: &[Shortcut],
     icon_dir: &Path,
     dry: bool,
 ) -> AppResult<SyncReport> {
-    let mut found = Vec::new();
-    for root in roots {
-        collect(root, 0, &mut found);
-    }
     let filters = read_filters(conn)?;
     let system_root = system_root();
-
-    // 「见过」按两种写法算：卡片存的 target，以及快捷方式自己的路径
-    //（桌面登记那批存的就是 .lnk 路径，同一个程序两种写法都可能是它）
-    let mut known: HashSet<String> = conn
-        .prepare("SELECT target FROM apps")?
-        .query_map([], |r| r.get::<_, String>(0))?
-        .filter_map(Result::ok)
-        .map(|t| path_key(&t))
-        .collect();
-
     let _ = std::fs::create_dir_all(icon_dir);
+
+    // 「见过」按两种写法算：卡片存的目标，以及条目的名字
+    //（开始菜单那批存的是解析出的 exe，注册表这条常常是同一个文件）
+    let mut known: HashSet<String> = HashSet::new();
+    let mut stmt = conn.prepare("SELECT name, target FROM apps")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    for row in rows.flatten() {
+        known.insert(name_key(&row.0));
+        known.insert(path_key(&row.1));
+    }
+
     let mut report = SyncReport {
-        scanned: found.len(),
+        scanned: entries.len(),
         inserted: 0,
         filtered: 0,
         already: 0,
+        unresolved: 0,
         total: 0,
         samples: Vec::new(),
     };
-    for item in found {
-        let lnk = path_key(&item.lnk);
-        let target = path_key(&item.target);
-        if known.contains(&lnk) || known.contains(&target) {
-            report.already += 1;
+
+    // 顺序是有意为之：先挡（过滤名单/系统应用），再认（库里已有），最后才说「找不到目标」。
+    // 反过来会把一百多条本来就不收的系统组件报成「认不出怎么打开」，那个数字就没意义了。
+    for entry in entries {
+        if entry.name.trim().is_empty() {
             continue;
         }
-        if hits(&item.name, &target, &lnk, &filters, &system_root) {
+        let resolved = resolve(entry, shortcuts);
+        if hits(entry, &resolved.target, &filters, &system_root) {
             report.filtered += 1;
             if report.samples.len() < SAMPLES {
-                report.samples.push(item.name.clone());
+                report.samples.push(entry.name.clone());
             }
             continue;
         }
+        let key = name_key(&entry.name);
+        let target_key = path_key(&resolved.target);
+        let seen = (!key.is_empty() && known.contains(&key))
+            || (!target_key.is_empty() && known.contains(&target_key));
+        if seen {
+            report.already += 1;
+            continue;
+        }
+        if resolved.found == Found::Nothing {
+            report.unresolved += 1;
+            continue;
+        }
         if !dry {
-            let icon = extract_icon(icon_dir, &[item.lnk.as_str(), item.target.as_str()]);
+            let mut candidates: Vec<&str> = resolved.icons.iter().map(|s| s.as_str()).collect();
+            candidates.push(resolved.target.as_str());
+            let icon = extract_icon(icon_dir, &candidates);
             conn.execute(
-                "INSERT INTO apps (name, target, source, icon_path) VALUES (?1, ?2, 'startmenu', ?3)",
-                params![item.name, item.target, icon],
+                "INSERT INTO apps (name, description, target, source, icon_path)
+                 VALUES (?1, ?2, ?3, 'registry', ?4)",
+                params![entry.name, describe(entry), resolved.target, icon],
             )?;
         }
-        known.insert(target);
-        known.insert(lnk);
+        known.insert(key);
+        known.insert(target_key);
         report.inserted += 1;
     }
+
     report.total = if dry {
         count_rows(conn)? + report.inserted
     } else {
         count_rows(conn)?
     };
     Ok(report)
+}
+
+/// 发行商和版本记在描述里：注册表比快捷方式多的就是这两个信息
+fn describe(entry: &Entry) -> Option<String> {
+    let parts: Vec<&str> = [&entry.publisher, &entry.version]
+        .into_iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}
+
+/// 按四级顺序找启动目标；前一级落空才走下一级
+pub(crate) fn resolve(entry: &Entry, shortcuts: &[Shortcut]) -> Resolved {
+    let icon = clean_path(&entry.display_icon);
+    let mut icons = Vec::new();
+    if !icon.is_empty() {
+        icons.push(icon.clone());
+    }
+
+    // 1. DisplayIcon 自己就是个真存在的 exe（`app.exe,0` 那种已经去过序号）
+    if usable_exe(&icon) {
+        return Resolved { target: icon.clone(), icons, found: Found::Exe };
+    }
+    // 1b. DisplayIcon 指的是一个快捷方式：那 shell 会把它的 IconLocation 和目标都算好
+    if extension_of(Path::new(&icon)) == "lnk" && Path::new(&icon).is_file() {
+        let target = launch_target(Path::new(&icon));
+        if launchable(&target) {
+            return Resolved { target, icons, found: Found::Exe };
+        }
+    }
+
+    // 2. 开始菜单的同名快捷方式：目标准，图标也是桌面上那张
+    if let Some(sc) = find_shortcut(&entry.name, shortcuts) {
+        let mut both = vec![sc.lnk.clone()];
+        both.extend(icons.iter().cloned());
+        return Resolved { target: sc.target.clone(), icons: both, found: Found::Shortcut };
+    }
+
+    let location = clean_path(&entry.install_location);
+    // 3. 安装目录里那个和程序同名的 exe
+    if usable_exe(&location) {
+        return Resolved { target: location.clone(), icons, found: Found::Exe };
+    }
+    let mut folder: Option<String> = None;
+    if !location.is_empty() && Path::new(&location).is_dir() {
+        if let Some(exe) = exe_named_like(&location, &entry.name) {
+            return Resolved { target: exe, icons, found: Found::Exe };
+        }
+        folder = Some(location.clone());
+    }
+
+    // 4. 卸载串里那个不是卸载器的 exe（有的程序把主程序和卸载器放一起）
+    if let Some(exe) = command_exe(&entry.uninstall) {
+        if usable_exe(&exe) {
+            return Resolved { target: exe, icons, found: Found::Exe };
+        }
+    }
+
+    // 5. 兜底：点开是安装目录，总比一张点不动的卡片有用
+    match folder {
+        Some(dir) => Resolved { target: dir, icons, found: Found::Folder },
+        None => Resolved { target: String::new(), icons, found: Found::Nothing },
+    }
+}
+
+/// 名字对上就取它；注册表里的名字常带厂商前缀和版本号，所以先严格相等、再去掉版本号、
+/// 最后才允许互相包含（短的当名字主体）
+fn find_shortcut<'a>(name: &str, shortcuts: &'a [Shortcut]) -> Option<&'a Shortcut> {
+    let key = name_key(name);
+    if key.is_empty() {
+        return None;
+    }
+    if let Some(hit) = shortcuts.iter().find(|s| s.key == key) {
+        return Some(hit);
+    }
+    let short = short_key(name);
+    if short.len() >= 4 {
+        if let Some(hit) = shortcuts.iter().find(|s| s.key == short) {
+            return Some(hit);
+        }
+    }
+    let mut best: Option<&Shortcut> = None;
+    for s in shortcuts {
+        if s.key.len() < 4 {
+            continue;
+        }
+        if (s.key.starts_with(&key) || key.starts_with(&s.key))
+            && best.map(|b| s.key.len() < b.key.len()).unwrap_or(true)
+        {
+            best = Some(s);
+        }
+    }
+    best
+}
+
+/// 安装目录顶层里和程序同名的那个 exe
+fn exe_named_like(dir: &str, name: &str) -> Option<String> {
+    let key = name_key(name);
+    let short = short_key(name);
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut loose: Option<String> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !usable_exe(&path.to_string_lossy()) {
+            continue;
+        }
+        let stem = name_key(&path.file_stem()?.to_string_lossy());
+        if stem == key {
+            return Some(path.to_string_lossy().to_string());
+        }
+        if short.len() >= 4 && stem == short {
+            loose = Some(path.to_string_lossy().to_string());
+        }
+    }
+    loose
 }
 
 fn count_rows(conn: &Connection) -> AppResult<usize> {
@@ -155,28 +397,69 @@ fn read_filters(conn: &Connection) -> AppResult<Filters> {
     Ok(Filters { patterns, system })
 }
 
-/// 名字和两种路径写法里任意一个包含某个模式就算命中；模式空串不挡东西
-fn hits(name: &str, target: &str, lnk: &str, filters: &Filters, system_root: &str) -> bool {
-    if filters.system && is_system_path(target, lnk, system_root) {
+/// 名字或任意一条路径包含某个模式就算命中；模式空串不挡东西
+fn hits(entry: &Entry, target: &str, filters: &Filters, system_root: &str) -> bool {
+    if filters.system && is_system(entry, target, system_root) {
         return true;
     }
-    let n = name.to_lowercase();
+    // 名字两种写法都比：原样折小写（带标点，「7-Zip 23.01 (x64)」这种模式要能命中），
+    // 以及只留字母数字的那份（快捷方式名字和注册表名字差个空格括号也算同一个）
+    let mut haystacks: Vec<String> = [
+        entry.install_location.as_str(),
+        entry.display_icon.as_str(),
+        entry.uninstall.as_str(),
+        entry.reg_key.as_str(),
+        target,
+    ]
+    .into_iter()
+    .map(path_key)
+    .collect();
+    haystacks.push(entry.name.to_lowercase());
+    haystacks.push(name_key(&entry.name));
     filters.patterns.iter().any(|p| {
         let p = p.trim().to_lowercase();
-        !p.is_empty() && (n.contains(&p) || target.contains(&p) || lnk.contains(&p))
+        !p.is_empty() && haystacks.iter().any(|h| h.contains(&p))
     })
 }
 
-/// 「系统应用」按路径认：Windows 目录自己，加上 UWP/商店应用住的 WindowsApps
-/// 和那几个 Windows 自带的 Program Files 子目录。
-/// 第三方装的 SDK（`Program Files (x86)\Windows Kits`）不在这儿，别一起挡掉。
-fn is_system_path(target: &str, lnk: &str, system_root: &str) -> bool {
-    let root = path_key(system_root).trim_end_matches('/').to_string();
-    let t = path_key(target);
-    let l = path_key(lnk);
-    let under = |p: &str| !root.is_empty() && (p == root || p.starts_with(&format!("{root}/")));
-    under(&t) || under(&l) || SYSTEM_MARKS.iter().any(|m| t.contains(m) || l.contains(m))
+/// 「系统应用」在注册表里有三种长相：明写自己是系统组件的、挂在别的程序底下的补丁、
+/// 以及名字一听就是附属程序的（更新程序、运行库、 redistributable）。
+/// 路径只按安装目录和真目标判：**MSI 的 DisplayIcon 全在 `C:\Windows\Installer` 里**，
+/// 拿它判系统会把一堆正经软件一起挡掉。
+fn is_system(entry: &Entry, target: &str, system_root: &str) -> bool {
+    if entry.system_component || entry.is_patch {
+        return true;
+    }
+    let lower = entry.name.to_lowercase();
+    if SYSTEM_NAME_MARKS.iter().any(|m| lower.contains(m)) {
+        return true;
+    }
+    let root = path_key(system_root);
+    let root = root.trim_end_matches('/');
+    if root.is_empty() {
+        return false;
+    }
+    [entry.install_location.as_str(), target]
+        .into_iter()
+        .map(path_key)
+        .any(|p| {
+            !p.is_empty()
+                && (p.starts_with(&format!("{root}/"))
+                    || SYSTEM_MARKS.iter().any(|m| p.contains(m)))
+        })
 }
+
+const SYSTEM_NAME_MARKS: [&str; 9] = [
+    "redistributable",
+    "update",
+    "updater",
+    "hotfix",
+    "runtime",
+    "component",
+    "helper",
+    "更新",
+    "运行库",
+];
 
 const SYSTEM_MARKS: [&str; 4] = [
     "/windowsapps/",
@@ -185,53 +468,120 @@ const SYSTEM_MARKS: [&str; 4] = [
     "/program files/windows security/",
 ];
 
+/// MSI 安装器缓存住的那个目录：里面的 exe 是重装/修复用的，不是程序本体
+const PACKAGE_CACHE_MARK: &str = "/package cache/";
+
 fn system_root() -> String {
     std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string())
 }
 
-/// 比对用的写法：老卡片存的是 `F:\\Program\\...`，手动填的可能是 `F:/Program/...`，
+/// 比对用的写法：老卡片存的是 `F:\\Program\\...`，注册表里可能是 `F:/Program/...`，
 /// 同一个程序不该因为斜杠方向被收两遍
 fn path_key(p: &str) -> String {
     p.trim().to_lowercase().replace('\\', "/")
 }
 
-fn collect(dir: &Path, depth: usize, out: &mut Vec<Discovered>) {
-    if depth > MAX_DEPTH {
-        return;
+/// 名字比对用的写法：折小写、只留字母数字（中文留着），这样「Foo 1.2 (64-bit)」
+/// 和「Foo1264bit」才算得上同一个东西
+fn name_key(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// 再去掉尾巴上的版本号和括号残留：注册表名字常比快捷方式多个「3.11.7」
+fn short_key(s: &str) -> String {
+    let full = name_key(s);
+    let keep = full
+        .trim_end_matches(|c: char| c.is_ascii_digit() || c == '.')
+        .trim_end_matches("bit");
+    keep.to_string()
+}
+
+/// `C:\P\app.exe,0`、`"C:\P\a b.exe" /X`、`%ProgramFiles%\Foo\foo.exe` 这些写法
+/// 收成一条能拿去判存在的路径
+pub(crate) fn clean_path(raw: &str) -> String {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return String::new();
     }
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
+    // 末尾的 `,0` / `,-1` 是图标序号，只有确实是整数时才剥
+    let body = match raw.rsplit_once(',') {
+        Some((head, tail)) if tail.trim().parse::<i32>().is_ok() => head.trim_end(),
+        _ => raw,
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect(&path, depth + 1, out);
-            continue;
-        }
-        let file_name = match path.file_name() {
-            Some(n) => n.to_string_lossy().to_string(),
-            None => continue,
-        };
-        if !file_name.to_ascii_lowercase().ends_with(".lnk") || is_uninstaller(&file_name) {
-            continue;
-        }
-        let target = launch_target(&path);
-        // 解析不出可启动目标的（目标文件被删了、指向一个目录）不收：
-        // 卡片点不动比少一张卡片更烦人
-        if !launchable(&target) {
-            continue;
-        }
-        let name = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or(file_name);
-        out.push(Discovered {
-            name,
-            lnk: path.to_string_lossy().to_string(),
-            target,
-        });
+    // 带引号取引号里那段（`"C:\Program Files\App\a.exe" /arg`）
+    let picked = match body.strip_prefix('"') {
+        Some(rest) => rest.split('"').next().unwrap_or(rest),
+        None => body,
+    };
+    expand_vars(picked.trim()).trim().to_string()
+}
+
+/// 卸载/安装串里的第一个可执行文件路径。MSI 那种 `MsiExec.exe /X{GUID}` 不带目录，
+/// 展开后文件不存在，调用方按「没找到」处理
+fn command_exe(cmd: &str) -> Option<String> {
+    let cmd = cmd.trim();
+    if cmd.is_empty() {
+        return None;
     }
+    let head = match cmd.strip_prefix('"') {
+        Some(rest) => rest.split('"').next().unwrap_or(rest),
+        None => cmd.split_whitespace().next().unwrap_or(cmd),
+    };
+    let expanded = expand_vars(head.trim()).trim().to_string();
+    if expanded.is_empty() {
+        None
+    } else {
+        Some(expanded)
+    }
+}
+
+/// 只做 `%NAME%` 替换；展开不出来的变量原样留着，不能把路径改成空串
+fn expand_vars(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        match rest[start + 1..].find('%') {
+            Some(end) => {
+                let span = &rest[start..start + end + 2];
+                let name = &span[1..span.len() - 1];
+                match std::env::var(name) {
+                    Ok(value) => out.push_str(&value),
+                    Err(_) => out.push_str(span),
+                }
+                rest = &rest[start + end + 2..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn is_exe_file(path: &str) -> bool {
+    !path.is_empty() && extension_of(Path::new(path)) == "exe" && Path::new(path).is_file()
+}
+
+/// 能拿去当启动目标的 exe：文件在、是 exe、不是卸载器/安装器，也不是 MSI 缓存在
+/// `ProgramData\Package Cache` 里的那个外壳—— burn engine 存的是重装/修复程序，
+/// 点它会弹出安装向导，Docker 和一堆华硕组件的 DisplayIcon 都写的这种路径。
+fn usable_exe(path: &str) -> bool {
+    is_exe_file(path) && !is_uninstaller(path) && !path_key(path).contains(PACKAGE_CACHE_MARK)
+}
+
+/// 卸载/安装器不是「打开应用」：`unins000.exe`、`Docker Desktop Installer.exe`、`某某卸载.exe` 都算
+fn is_uninstaller(path: &str) -> bool {
+    let name = Path::new(path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    name.starts_with("unins") || name.contains("uninstall") || name.contains("installer") || name.contains("卸载")
 }
 
 fn launchable(target: &str) -> bool {
@@ -247,10 +597,41 @@ fn launchable(target: &str) -> bool {
     !matches!(extension_of(path).as_str(), "ico" | "cur")
 }
 
-/// 卸载器链接不是「打开应用」，收进来只会多出一堆点了没反应的卡片
-fn is_uninstaller(file_name: &str) -> bool {
-    let n = file_name.to_lowercase();
-    n.starts_with("uninstall") || n.contains("卸载")
+fn collect_shortcuts(dir: &Path, depth: usize, out: &mut Vec<Shortcut>) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_shortcuts(&path, depth + 1, out);
+            continue;
+        }
+        let file_name = match path.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => continue,
+        };
+        if !file_name.to_ascii_lowercase().ends_with(".lnk") || is_uninstaller(&file_name) {
+            continue;
+        }
+        let target = launch_target(&path);
+        // 解析不出可启动目标的（目标文件被删了、指向一个目录）不进索引
+        if !launchable(&target) {
+            continue;
+        }
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or(file_name);
+        out.push(Shortcut {
+            key: name_key(&stem),
+            lnk: path.to_string_lossy().to_string(),
+            target,
+        });
+    }
 }
 
 /// 过滤名单：一条模式就是个小写子串，比对名字和路径两种写法
@@ -287,24 +668,31 @@ mod tests {
     }
 
     fn sandbox(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("workbench-installed-{tag}"));
+        let dir = std::env::temp_dir().join(format!("workbench-registry-{tag}"));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("Programs")).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
-    /// 假 .lnk：resolve_lnk 解不开，于是目标就是它自己——正好用来测「收进来 / 去过重」这套逻辑
-    fn fake_lnk(dir: &Path, name: &str) -> PathBuf {
+    fn touch(dir: &Path, name: &str) -> String {
         let p = dir.join(name);
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
-        std::fs::write(&p, b"not a real shell link").unwrap();
-        p
+        std::fs::write(&p, b"MZ\x90\x00not a real binary").unwrap();
+        p.to_string_lossy().to_string()
     }
 
-    fn targets(c: &Connection) -> Vec<String> {
-        c.prepare("SELECT name || '|' || source FROM apps ORDER BY name")
+    fn entry(name: &str) -> Entry {
+        Entry {
+            name: name.to_string(),
+            reg_key: format!(r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\{name}"),
+            ..Default::default()
+        }
+    }
+
+    fn rows(c: &Connection) -> Vec<String> {
+        c.prepare("SELECT name || '|' || source || '|' || COALESCE(description,'') FROM apps ORDER BY name")
             .unwrap()
             .query_map([], |r| r.get::<_, String>(0))
             .unwrap()
@@ -312,203 +700,295 @@ mod tests {
             .unwrap()
     }
 
-    fn add_category(c: &Connection, name: &str) -> i64 {
-        c.execute(
-            "INSERT INTO categories (name, type) VALUES (?1, 'app')",
-            params![name],
-        )
-        .unwrap();
-        c.last_insert_rowid()
+    fn plan_with(conn: &Connection, entries: &[Entry], shortcuts: &[Shortcut], icons: &Path, dry: bool) -> SyncReport {
+        plan(conn, entries, shortcuts, icons, dry).unwrap()
     }
 
     fn inserted(report: SyncReport) -> usize {
         report.inserted
     }
 
+    /// DisplayIcon 里那个真存在的 exe 是最准的目标，`,0` 那种序号得剥掉
     #[test]
-    fn it_collects_shortcuts_in_vendor_subfolders_and_skips_the_rest() {
-        let root = sandbox("collect");
-        let programs = root.join("Programs");
-        let icon_dir = root.join("icons");
-        fake_lnk(&programs, "Loomy.lnk");
-        fake_lnk(&programs.join("Python"), "Python 3.11 (64-bit).lnk");
-        fake_lnk(&programs, "uninstall.lnk");
-        fake_lnk(&programs, "某某 卸载.lnk");
-        std::fs::write(programs.join("readme.txt"), b"x").unwrap();
+    fn a_display_icon_exe_becomes_the_target() {
+        let dir = sandbox("display-icon");
+        let exe = touch(&dir, r"Foo\foo.exe");
+        let e = Entry { display_icon: format!("{exe},0"), ..entry("Foo") };
+
+        let r = resolve(&e, &[]);
+        assert_eq!(r.found, Found::Exe);
+        assert_eq!(r.target, exe);
+        assert_eq!(r.icons, vec![exe.clone()]);
 
         let c = conn();
-        let report = scan(&c, std::slice::from_ref(&programs), &icon_dir, false).unwrap();
-        // 厂商子目录里的收了，卸载器和非快捷方式没收
-        assert_eq!(report.scanned, 2, "{report:?}");
-        assert_eq!(inserted(report), 2);
-        assert_eq!(
-            targets(&c),
-            vec!["Loomy|startmenu", "Python 3.11 (64-bit)|startmenu"]
-        );
-
-        // 再同步一次一个都不该新增：target 和 .lnk 两种写法都记下来了
-        let again = scan(&c, &[programs], &icon_dir, false).unwrap();
-        assert_eq!(again.inserted, 0);
-        assert_eq!(again.already, 2, "{again:?}");
-        assert_eq!(again.total, 2);
+        let report = plan_with(&c, std::slice::from_ref(&e), &[], &dir.join("icons"), false);
+        assert_eq!(report.inserted, 1, "{report:?}");
+        assert_eq!(rows(&c), vec!["Foo|registry|".to_string()]);
     }
 
+    /// 卸载器图标不能当目标：MSI 那一堆 `C:\Windows\Installer\{GUID}\ARPIcon.ico`    /// 和 `uninstallerIcon.ico` 都只是图标，卡片点开该是安装目录
     #[test]
-    fn an_app_already_registered_by_another_source_is_not_duplicated() {
-        let root = sandbox("dedupe");
-        let programs = root.join("Programs");
-        let lnk = fake_lnk(&programs, "Docker Desktop.lnk");
+    fn an_uninstaller_icon_is_an_icon_not_a_target() {
+        let dir = sandbox("uninstaller-icon");
+        let ico = touch(&dir, r"Foo\uninstallerIcon.ico");
+        let unins = touch(&dir, r"Foo\unins000.exe");
+        let install = dir.join("Foo");
+        let e = Entry {
+            display_icon: ico.clone(),
+            uninstall: format!(r#""{unins}" /SILENT"#),
+            install_location: install.to_string_lossy().to_string(),
+            ..entry("Foo")
+        };
+
+        let r = resolve(&e, &[]);
+        assert_eq!(r.found, Found::Folder, "卸载器不该被当成打开应用");
+        assert_eq!(r.target, install.to_string_lossy().to_string());
+        // 图标还是从 DisplayIcon 抽：那张就是桌面上看到的
+        assert_eq!(r.icons, vec![ico]);
+    }
+
+    /// 名单里的模式常是从卡片名字照抄的，带着括号和版本号：这种写法也得命中名字
+    #[test]
+    fn a_pattern_copied_from_the_card_name_still_blocks_it() {
+        let dir = sandbox("punct-pattern");
+        let exe = touch(&dir, r"Zip\7zFM.exe");
         let c = conn();
-        let net = add_category(&c, "网络工具");
-        // 桌面登记那批存的正是 .lnk 自身路径：按路径认出是同一个
+        add_app_filter(&c, "7-Zip 23.01 (x64)").unwrap();
+        let e = Entry { display_icon: exe, ..entry("7-Zip 23.01 (x64)") };
+
+        let report = plan_with(&c, &[e], &[], &dir.join("icons"), false);
+        assert_eq!(report.filtered, 1, "{report:?}");
+        assert_eq!(report.inserted, 0);
+        assert_eq!(report.samples, vec!["7-Zip 23.01 (x64)".to_string()]);
+    }
+
+    /// 卸载器、`Docker Desktop Installer.exe` 这种安装器、还有 Package Cache 里那个
+    /// setup 外壳，点开都是安装/修复向导，不是程序本体：一律不算目标
+    #[test]
+    fn an_installer_exe_is_never_the_target() {
+        let dir = sandbox("installer");
+        let installer = touch(&dir, r"Docker\Docker Desktop Installer.exe");
+        let cached = touch(&dir, r"Package Cache\{62b10058}\AuraServiceSetup.exe");
+        std::fs::create_dir_all(dir.join("Aura")).unwrap();
+
+        let by_name = resolve(&Entry { display_icon: installer, ..entry("Docker Desktop") }, &[]);
+        assert_eq!(by_name.found, Found::Nothing, "安装器 exe 不该被当成目标");
+
+        let by_path = resolve(
+            &Entry {
+                display_icon: cached,
+                install_location: dir.join("Aura").to_string_lossy().to_string(),
+                ..entry("AURA Service")
+            },
+            &[],
+        );
+        assert_eq!(by_path.found, Found::Folder, "Package Cache 里那个是重装程序");
+        assert_eq!(by_path.target, dir.join("Aura").to_string_lossy().to_string());
+    }
+
+    /// 开始菜单的同名快捷方式排在安装目录前面：目标准、图标也是 shell 算好的那张
+    #[test]
+    fn a_same_name_shortcut_beats_the_folder_fallback() {
+        let dir = sandbox("shortcut");
+        let real = touch(&dir, r"Loomy\loomy.exe");
+        let install = dir.join("Loomy");
+        let sc = Shortcut {
+            key: name_key("Loomy"),
+            lnk: dir.join("Loomy.lnk").to_string_lossy().to_string(),
+            target: real.clone(),
+        };
+        let e = Entry {
+            install_location: install.to_string_lossy().to_string(),
+            ..entry("Loomy")
+        };
+
+        let r = resolve(&e, std::slice::from_ref(&sc));
+        assert_eq!(r.found, Found::Shortcut);
+        assert_eq!(r.target, real);
+        assert_eq!(r.icons[0], sc.lnk, "抽图标要从快捷方式来");
+    }
+
+    /// 安装目录顶层那个和程序同名的 exe 也算找到了
+    #[test]
+    fn an_exe_named_like_the_program_inside_the_install_dir_is_used() {
+        let dir = sandbox("dir-exe");
+        let exe = touch(&dir, r"Gimp\gimp.exe");
+        touch(&dir, r"Gimp\unins000.exe");
+        let e = Entry { install_location: dir.join("Gimp").to_string_lossy().to_string(), ..entry("GIMP") };
+
+        let r = resolve(&e, &[]);
+        assert_eq!(r.found, Found::Exe);
+        assert_eq!(path_key(&r.target), path_key(&exe));
+    }
+
+    /// 什么路径都没有的：报数，不收一张点不动的卡片
+    #[test]
+    fn an_entry_without_any_path_is_counted_not_collected() {
+        let dir = sandbox("nothing");
+        let c = conn();
+        let report = plan_with(&c, &[entry("幽灵程序")], &[], &dir.join("icons"), false);
+        assert_eq!(report.unresolved, 1, "{report:?}");
+        assert_eq!(report.inserted, 0);
+        assert_eq!(rows(&c), Vec::<String>::new());
+    }
+
+    /// 同一个程序在 64 位和 32 位视图里各登记一次，只该收一张
+    #[test]
+    fn the_same_product_in_two_views_is_collected_once() {
+        let dir = sandbox("two-views");
+        let exe = touch(&dir, r"Two\two.exe");
+        let mut first = Entry { display_icon: exe.clone(), ..entry("Two Tool") };
+        first.version = "1.2.3".into();
+        first.publisher = "某某科技".into();
+        let second = Entry { display_icon: exe.clone(), ..entry("Two Tool") };
+
+        let c = conn();
+        let report = plan_with(&c, &[first, second], &[], &dir.join("icons"), false);
+        assert_eq!(report.inserted, 1, "{report:?}");
+        assert_eq!(report.already, 1, "第二条得认出是同一个");
+        assert_eq!(rows(&c), vec!["Two Tool|registry|某某科技 · 1.2.3"]);
+    }
+
+    /// 「应用」页那批开始菜单卡片存的是解析出的 exe：名字或路径任一对上就不重复收
+    #[test]
+    fn a_card_from_the_start_menu_page_blocks_the_registry_row() {
+        let dir = sandbox("startmenu-block");
+        let exe = touch(&dir, r"Docker\docker-desktop.exe");
+        let c = conn();
         c.execute(
-            "INSERT INTO apps (name, target, source, category_id) VALUES ('Docker Desktop.lnk', ?1, 'desktop', ?2)",
-            params![lnk.to_string_lossy().to_string(), net],
+            "INSERT INTO apps (name, target, source) VALUES ('Docker Desktop', ?1, 'startmenu')",
+            params![path_key(&exe).replace('/', r"\")],
         )
         .unwrap();
+        let e = Entry { display_icon: exe, ..entry("Docker Desktop") };
 
-        assert_eq!(
-            inserted(scan(&c, &[programs], &root.join("icons"), false).unwrap()),
-            0
-        );
-        assert_eq!(targets(&c), vec!["Docker Desktop.lnk|desktop"]);
+        let report = plan_with(&c, &[e], &[], &dir.join("icons"), false);
+        assert_eq!(report.inserted, 0, "{report:?}");
+        assert_eq!(report.already, 1);
+        assert_eq!(rows(&c), vec!["Docker Desktop|startmenu|"]);
     }
 
-    /// 同一个程序换了斜杠方向也算认得：老卡片存反斜杠，手动填的可能是正斜杠
-    #[test]
-    fn the_same_program_under_a_different_slash_is_not_collected_twice() {
-        let root = sandbox("slashes");
-        let programs = root.join("Programs");
-        let lnk = fake_lnk(&programs, "Loomy.lnk").to_string_lossy().to_string();
-        let c = conn();
-        c.execute(
-            "INSERT INTO apps (name, target, source) VALUES ('Loomy', ?1, 'manual')",
-            params![lnk.replace('\\', "/")],
-        )
-        .unwrap();
-
-        assert_eq!(
-            inserted(scan(&c, std::slice::from_ref(&programs), &root.join("icons"), false).unwrap()),
-            0
-        );
-    }
-
+    /// 老卡片只改过名字、路径认不出时，新条目照常收，但那一行一个字都不动
     #[test]
     fn sync_never_touches_an_existing_row() {
-        let root = sandbox("no-clobber");
-        let programs = root.join("Programs");
-        fake_lnk(&programs, "Loomy.lnk");
+        let dir = sandbox("no-clobber");
+        let exe = touch(&dir, r"Loomy\loomy.exe");
         let c = conn();
-        let mine = add_category(&c, "我的分类");
-        // 老行按目标认不出（存的是别处的副本路径），所以会新增一条，
-        // 但老行被人改过的名字和分类必须一个字都不动
         c.execute(
-            "INSERT INTO apps (name, target, source, category_id, alias) VALUES ('我的洛米', 'F:/other/Loomy.exe', 'manual', ?1, 'l')",
-            params![mine],
+            "INSERT INTO apps (name, target, source, category_id, alias) VALUES ('我的洛米', 'F:/other/Loomy.exe', 'manual', NULL, 'l')",
+            [],
         )
         .unwrap();
+        let e = Entry { display_icon: exe, ..entry("Loomy") };
 
-        scan(&c, &[programs], &root.join("icons"), false).unwrap();
-        let (name, cat): (String, Option<i64>) = c
-            .query_row("SELECT name, category_id FROM apps WHERE alias = 'l'", [], |r| {
+        plan_with(&c, &[e], &[], &dir.join("icons"), false);
+        let (name, target): (String, String) = c
+            .query_row("SELECT name, target FROM apps WHERE alias = 'l'", [], |r| {
                 Ok((r.get(0)?, r.get(1)?))
             })
             .unwrap();
-        assert_eq!((name.as_str(), cat), ("我的洛米", Some(mine)));
-        assert!(targets(&c).contains(&"Loomy|startmenu".to_string()));
+        assert_eq!((name.as_str(), target.as_str()), ("我的洛米", "F:/other/Loomy.exe"));
+        assert!(rows(&c).contains(&"Loomy|registry|".to_string()));
     }
 
     /// 删掉的卡片下次同步照样收回来：过滤名单在 app_filters，不是删一次的副产品
     #[test]
     fn a_deleted_card_comes_back_on_the_next_sync() {
-        let root = sandbox("resync");
-        let programs = root.join("Programs");
-        fake_lnk(&programs, "Game Launcher.lnk");
-        let roots = [programs];
-        let icons = root.join("icons");
+        let dir = sandbox("resync");
+        let exe = touch(&dir, r"Game\launcher.exe");
+        let e = Entry { display_icon: exe.clone(), ..entry("Game Launcher") };
+        let icons = dir.join("icons");
         let c = conn();
 
-        assert_eq!(inserted(scan(&c, &roots, &icons, false).unwrap()), 1);
+        assert_eq!(inserted(plan_with(&c, std::slice::from_ref(&e), &[], &icons, false)), 1);
         let id: i64 = c.query_row("SELECT id FROM apps", [], |r| r.get(0)).unwrap();
         crate::services::desktop::delete_app(&c, id).unwrap();
-        assert_eq!(targets(&c), Vec::<String>::new(), "卡片本身要删掉");
-
-        assert_eq!(inserted(scan(&c, &roots, &icons, false).unwrap()), 1);
+        assert_eq!(rows(&c), Vec::<String>::new());
+        assert_eq!(inserted(plan_with(&c, &[e], &[], &icons, false)), 1);
     }
 
-    /// 过滤名单挡掉的不写库，但要在账单里看得见，试算还得报上名字
+    /// 名单能挡名字，也能挡安装目录、注册表键和 DisplayIcon 路径
     #[test]
     fn a_filtered_entry_is_counted_not_collected() {
-        let root = sandbox("filtered");
-        let programs = root.join("Programs");
-        fake_lnk(&programs, "Loomy.lnk");
-        fake_lnk(&programs, "某某助手.lnk");
-        let roots = [programs];
-        let icons = root.join("icons");
+        let dir = sandbox("filtered");
+        let exe = touch(&dir, r"助手\x.exe");
+        let icons = dir.join("icons");
         let c = conn();
         c.execute("INSERT INTO app_filters (pattern) VALUES ('助手')", []).unwrap();
 
-        let report = scan(&c, &roots, &icons, false).unwrap();
-        assert_eq!(report.inserted, 1, "{report:?}");
-        assert_eq!(report.filtered, 1);
-        assert_eq!(report.samples, vec!["某某助手".to_string()]);
-        assert_eq!(targets(&c), vec!["Loomy|startmenu"]);
-
-        // 路径写法也能挡：加一条指到沙箱目录的模式，剩下的那个也不收了
-        c.execute(
-            "INSERT INTO app_filters (pattern) VALUES (?1)",
-            params![root.to_string_lossy().to_string()],
-        )
-        .unwrap();
-        let report = scan(&c, &roots, &icons, false).unwrap();
+        let by_name = Entry { display_icon: exe.clone(), ..entry("某某助手") };
+        let report = plan_with(&c, &[by_name, entry("Loomy")], &[], &icons, false);
         assert_eq!(report.inserted, 0, "{report:?}");
-        assert_eq!(report.filtered, 1);
+        assert_eq!(report.filtered, 1, "名字里带模式的这条要挡住");
+        assert_eq!(report.unresolved, 1, "Loomy 什么路径都没有");
+        assert_eq!(report.samples, vec!["某某助手".to_string()]);
+        assert_eq!(rows(&c), Vec::<String>::new());
+
+        // 路径写法也能挡：DisplayIcon 里那段目录就在名单里
+        let mut second = Entry { display_icon: exe.clone(), ..entry("另一个") };
+        second.install_location = dir.join("助手").to_string_lossy().to_string();
+        let c2 = conn();
+        c2.execute("INSERT INTO app_filters (pattern) VALUES ('助手')", []).unwrap();
+        let report = plan_with(&c2, &[second], &[], &icons, false);
+        assert_eq!(report.filtered, 1, "{report:?}");
     }
 
+    /// 「系统应用」在注册表里的三种长相都要挡；但 MSI 的图标住在 Windows 目录里，
+    /// 那不能算系统应用——否则正经软件会被成片挡掉
     #[test]
-    fn the_system_switch_filters_windows_itself_not_third_party_sdks() {
+    fn system_entries_are_filtered_and_msi_icons_are_not() {
+        let dir = sandbox("system");
+        let exe = touch(&dir, r"Real\real.exe");
         let root = r"C:\Windows";
-        let no_system = Filters { patterns: vec![], system: false };
-        let with_system = Filters { patterns: vec![], system: true };
 
-        assert!(hits("资源管理器", &path_key(r"C:\Windows\explorer.exe"), "", &with_system, root));
-        assert!(hits(
-            "记事本",
-            &path_key(r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\Notepad.exe"),
-            "",
-            &with_system,
-            root
-        ));
-        // 第三方装的 Windows Kits、装在 Program Files 的普通软件都不该被当成系统应用
-        assert!(!hits(
-            "Application Verifier",
-            &path_key(r"C:\Program Files (x86)\Windows Kits\appverif.exe"),
-            "",
-            &with_system,
-            root
-        ));
-        assert!(!hits("Loomy", &path_key(r"F:\Program\Loomy\loomy.exe"), "", &with_system, root));
-        // 关掉开关就一个都不挡
-        assert!(!hits("资源管理器", &path_key(r"C:\Windows\explorer.exe"), "", &no_system, root));
+        let with_system = Filters { patterns: vec![], system: true };
+        let no_system = Filters { patterns: vec![], system: false };
+
+        let mut component = entry("某系统组件");
+        component.system_component = true;
+        assert!(hits(&component, &exe, &with_system, root));
+
+        let mut patch = entry("某程序 1.2 补丁");
+        patch.is_patch = true;
+        assert!(hits(&patch, &exe, &with_system, root));
+
+        assert!(hits(&entry("Microsoft Edge Update"), &exe, &with_system, root), "更新程序是附属程序");
+        assert!(hits(&entry("Microsoft Visual C++ 2015  redistributable - x64"), &exe, &with_system, root));
+        let mut under_windows = entry("资源管理器附带");
+        under_windows.install_location = format!(r"{root}\System32");
+        assert!(hits(&under_windows, &exe, &with_system, root));
+
+        // 正经软件：图标在 C:\Windows\Installer 里，安装在别处
+        let msi = Entry {
+            display_icon: format!(r"{root}\Installer\{{GUID}}\ARPIcon.ico,0"),
+            install_location: r"F:\Program\Real".to_string(),
+            uninstall: format!(r#""{exe}" /uninstall"#),
+            ..entry("Real Thing")
+        };
+        assert!(!hits(&msi, &exe, &with_system, root), "MSI 图标在 Windows 目录里不该被当成系统应用");
+        // 关掉开关，系统组件也不挡了
+        assert!(!hits(&component, &exe, &no_system, root));
     }
 
     /// 试算只看不动库：数字要和真同步一致，但一行都不写
     #[test]
     fn a_preview_counts_without_writing_anything() {
-        let root = sandbox("preview");
-        let programs = root.join("Programs");
-        fake_lnk(&programs, "Loomy.lnk");
-        fake_lnk(&programs, "GIMP.lnk");
-        let roots = [programs];
-        let icons = root.join("icons");
+        let dir = sandbox("preview");
+        let a = touch(&dir, "A\\a.exe");
+        let b = touch(&dir, "B\\b.exe");
+        let entries = vec![
+            Entry { display_icon: a, ..entry("Aaaa") },
+            Entry { display_icon: b, ..entry("Bbbb") },
+        ];
+        let icons = dir.join("icons");
         let c = conn();
 
-        let preview = scan(&c, &roots, &icons, true).unwrap();
+        let preview = plan_with(&c, &entries, &[], &icons, true);
         assert_eq!(preview.inserted, 2, "{preview:?}");
         assert_eq!(preview.total, 2, "试算要把「同步之后会长成多少张」说出来");
-        assert_eq!(targets(&c), Vec::<String>::new(), "试算不该写库");
+        assert_eq!(rows(&c), Vec::<String>::new(), "试算不该写库");
 
-        let real = scan(&c, &roots, &icons, false).unwrap();
+        let real = plan_with(&c, &entries, &[], &icons, false);
         assert_eq!(real.inserted, preview.inserted);
         assert_eq!(real.total, 2);
     }
@@ -536,57 +1016,142 @@ mod tests {
         assert!(read_filters(&c).unwrap().system);
     }
 
-    /// 真机核对：拿真的开始菜单跑一遍，看收得出多少条、图标抽到几张。
-    /// 库是内存库所以不动他的数据，只有图标 PNG 会照常写进图标缓存。
-    /// 要 `CoInitializeEx`：解析 .lnk 和抽图标都走 shell，COM 没初始化就全都解不出——
-    /// 应用里那两个 API 是在主线程的命令里跑的，线程已经初始化过了，测试线程得自己补。
+    /// 注册表里的路径写法五花八门：图标序号、引号包着带空格的目录、后面还跟着参数、
+    /// `%变量%` 没展开
+    #[test]
+    fn messy_registry_paths_come_out_as_one_usable_path() {
+        std::env::set_var("WORKBENCH_TEST_DIR", r"F:\Program\Two Words");
+        assert_eq!(
+            clean_path(r#"%WORKBENCH_TEST_DIR%\app.exe, 0"#),
+            r"F:\Program\Two Words\app.exe"
+        );
+        assert_eq!(
+            clean_path(r#""F:\Program\Two Words\app.exe" --silent"#),
+            r"F:\Program\Two Words\app.exe"
+        );
+        assert_eq!(clean_path(r"F:\a,b\c.exe"), r"F:\a,b\c.exe", "路径里真有逗号时别乱剥");
+        assert_eq!(clean_path(r"%这个变量不存在%\x.exe"), r"%这个变量不存在%\x.exe", "展开不了的原样留着");
+        assert_eq!(clean_path(""), "");
+        assert_eq!(command_exe(r#""F:\P\app.exe" /uninstall"#).as_deref(), Some(r"F:\P\app.exe"));
+        assert_eq!(command_exe("MsiExec.exe /X{GUID}").as_deref(), Some("MsiExec.exe"));
+        assert_eq!(command_exe(""), None);
+        assert!(is_uninstaller(r"F:\P\unins000.exe"));
+        assert!(is_uninstaller(r"F:\P\某某卸载.exe"));
+        assert!(!is_uninstaller(r"F:\P\app.exe"));
+    }
+
+    /// 名字比对：版本号和括号那些尾巴不该把同一个程序拆成两个
+    #[test]
+    fn names_match_across_version_tails_and_slashes() {
+        assert_eq!(name_key(" 某某 助手 2.1 (x64) "), name_key("某某助手21x64"));
+        assert_eq!(short_key("Python 3.11.7"), short_key("Python"));
+        assert_eq!(path_key(r"F:\Program\App.exe"), path_key("F:/Program/App.exe"));
+
+        let sc = [Shortcut {
+            key: name_key("Loomy"),
+            lnk: "L:\\Loomy.lnk".into(),
+            target: "L:\\Loomy\\loomy.exe".into(),
+        }];
+        // 注册表那条多了版本号：严格相等对不上，去版本号才对上
+        assert!(find_shortcut("Loomy 1.2.3", &sc).is_some());
+        assert!(find_shortcut("完全不同的东西", &sc).is_none());
+    }
+
+    /// 快捷方式索引只收真能启动的：卸载器、目录、解析不出目标的都不进
+    #[test]
+    fn the_shortcut_index_keeps_only_launchable_entries() {
+        let dir = sandbox("index");
+        let programs = dir.join("Programs");
+        std::fs::create_dir_all(programs.join("厂商")).unwrap();
+        touch(&programs, "Loomy.lnk");
+        touch(&programs.join("厂商"), "Nested.lnk");
+        touch(&programs, "uninstall.lnk");
+        touch(&programs, "某某 卸载.lnk");
+        touch(&programs, "readme.txt");
+        std::fs::create_dir_all(programs.join("Gone.lnk")).unwrap();
+
+        let index = shortcut_index(std::slice::from_ref(&programs));
+        let mut keys: Vec<String> = index.iter().map(|s| s.key.clone()).collect();
+        keys.sort();
+        assert_eq!(keys, vec!["loomy".to_string(), "nested".to_string()], "{index:?}");
+    }
+
+    /// 真机核对一：拿这台机器的注册表跑一遍，看四个视图一共读出多少条、
+    /// 各级目标找到多少、图标抽到几张。库是内存库，不动他的数据。
+    /// 只有解析快捷方式那步要 COM，测试线程得自己初始化。
     #[test]
     #[ignore]
-    fn the_real_start_menu_yields_launchable_apps() {
+    fn the_real_registry_lists_installed_programs() {
         use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
+        let entries = read_entries();
+        assert!(entries.len() > 20, "注册表只读出 {} 条，多半是视图没开对", entries.len());
+        let shortcuts = shortcut_index(
+            &crate::win::desktop::all_program_menus()
+                .into_iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>(),
+        );
+        let mut tiers = [0usize; 4];
+        for e in &entries {
+            tiers[match resolve(e, &shortcuts).found {
+                Found::Exe => 0,
+                Found::Shortcut => 1,
+                Found::Folder => 2,
+                Found::Nothing => 3,
+            }] += 1;
+        }
+        println!(
+            "注册表读出 {} 条（快捷方式索引 {} 条）：exe {} / 快捷方式 {} / 只剩目录 {} / 什么都没找到 {}",
+            entries.len(),
+            shortcuts.len(),
+            tiers[0],
+            tiers[1],
+            tiers[2],
+            tiers[3]
+        );
+        for e in &entries[..entries.len().min(15)] {
+            let r = resolve(e, &shortcuts);
+            println!("  {} [{:?}] -> {}", e.name, r.found, r.target);
+        }
+
         let c = conn();
-        let report = sync_installed(&c).unwrap();
+        let report = plan(&c, &entries, &shortcuts, &get_icon_dir().unwrap(), false).unwrap();
         let with_icon: i64 = c
-            .query_row(
-                "SELECT COUNT(*) FROM apps WHERE icon_path IS NOT NULL",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM apps WHERE icon_path IS NOT NULL", [], |r| r.get(0))
             .unwrap();
-        let rows: Vec<(String, String)> = c
-            .prepare("SELECT name, target FROM apps ORDER BY name LIMIT 12")
+        let with_meta: i64 = c
+            .query_row("SELECT COUNT(*) FROM apps WHERE description IS NOT NULL", [], |r| r.get(0))
+            .unwrap();
+        println!(
+            "收进来 {} 个、库里原有 {} 个、被挡 {} 个、找不到目标的 {} 个；有图标 {with_icon} 张、有版本/发行商 {with_meta} 条",
+            report.inserted, report.already, report.filtered, report.unresolved
+        );
+        assert!(report.inserted > 10, "只收进 {} 个", report.inserted);
+        assert!(with_icon * 2 > report.inserted as i64, "只抽到 {with_icon} 张图标，抽图标这步多半整片失败了");
+        assert!(
+            report.unresolved * 2 <= report.scanned,
+            "{} / {} 条连一条路径都认不出来，比例太高",
+            report.unresolved,
+            report.scanned
+        );
+
+        let examples: Vec<(String, String, Option<String>)> = c
+            .prepare("SELECT name, target, description FROM apps ORDER BY name LIMIT 10")
             .unwrap()
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        println!(
-            "扫到 {} 个，收进来 {} 个，被过滤 {} 个，抽到图标 {with_icon} 张",
-            report.scanned, report.inserted, report.filtered
-        );
-        for (name, target) in rows {
-            println!("  {name} -> {target}");
+        for (name, target, description) in examples {
+            println!("  {name} | {description:?} | {target}");
         }
-        assert!(report.inserted > 10, "只收出 {} 个", report.inserted);
-        // 解析不出目标的那些会退回 .lnk 自身：少量正常（指向商店应用、指向文件夹），大面积失败就是 COM 没起
-        let unresolved: i64 = c
-            .query_row("SELECT COUNT(*) FROM apps WHERE lower(target) LIKE '%.lnk'", [], |r| r.get(0))
-            .unwrap();
-        assert!(
-            unresolved * 10 <= report.inserted as i64,
-            "{unresolved} 个快捷方式没解析出真实目标，多半是解析这步整片失败了"
-        );
-        assert!(
-            with_icon * 2 > report.inserted as i64,
-            "只抽到 {with_icon} 张图标，抽图标这步多半整片失败了"
-        );
     }
 
-    /// 真机核对第二半：过滤名单在这台机器上到底挡不挡东西。
-    /// 关开关 → 系统应用回来了；拿其中一个名字进名单、照拖动那样删掉卡片 → 再同步不该回来。
+    /// 真机核对二：过滤名单在这台机器上到底挡不挡东西。
+    /// 关开关 → 系统组件回来了；拿其中一个名字进名单、照拖动那样删掉卡片 → 再同步不该回来。
     #[test]
     #[ignore]
     fn the_filter_list_actually_blocks_on_this_machine() {
@@ -594,13 +1159,21 @@ mod tests {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
+        let entries = read_entries();
+        let shortcuts = shortcut_index(
+            &crate::win::desktop::all_program_menus()
+                .into_iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>(),
+        );
+        let icons = get_icon_dir().unwrap();
         let c = conn();
 
-        let on_first = sync_installed(&c).unwrap();
+        let on_first = plan(&c, &entries, &shortcuts, &icons, false).unwrap();
         assert!(on_first.filtered > 0, "默认开着系统应用过滤却一个都没挡：{on_first:?}");
         crate::services::settings::set_setting(&c, SYSTEM_SWITCH, "0").unwrap();
-        let system_off = sync_installed(&c).unwrap();
-        assert_eq!(system_off.scanned, on_first.scanned, "开关不该改变扫到的总数");
+        let system_off = plan(&c, &entries, &shortcuts, &icons, false).unwrap();
+        assert_eq!(system_off.scanned, on_first.scanned, "开关不该改变读到的总数");
         println!(
             "默认开：收 {} / 挡 {}；关掉开关后又收回 {} 个系统应用",
             on_first.inserted, on_first.filtered, system_off.inserted
@@ -610,52 +1183,14 @@ mod tests {
         let (vid, victim): (i64, String) = c
             .query_row("SELECT id, name FROM apps LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
             .unwrap();
-        let before = system_off.total;
         add_app_filter(&c, &victim).unwrap();
         crate::services::desktop::delete_app(&c, vid).unwrap();
-        let after = sync_installed(&c).unwrap();
+        let after = plan(&c, &entries, &shortcuts, &icons, false).unwrap();
         let still: i64 = c
             .query_row("SELECT COUNT(*) FROM apps WHERE name = ?1", params![victim], |r| r.get(0))
             .unwrap();
-        println!(
-            "把「{victim}」加进名单再同步：库里 {before} → {}，本次收 {}、挡 {}",
-            after.total, after.inserted, after.filtered
-        );
+        println!("把「{victim}」加进名单再同步：库里现在 {} 个，本次收 {}、挡 {}", after.total, after.inserted, after.filtered);
         assert_eq!(still, 0, "名单里那个又被收回来了，过滤没生效");
         assert!(after.filtered >= 1, "{after:?}");
-    }
-
-    #[test]
-    fn only_a_launchable_target_counts() {
-        assert!(launchable("http://localhost:9200/"), "网址目标算可启动");
-        assert!(!launchable(""), "解不出目标的不要");
-        assert!(
-            !launchable(r"C:\Users\me\Desktop\这个文件不存在.exe"),
-            "目标文件被删了的不要"
-        );
-        let here = std::env::current_exe().unwrap();
-        assert!(
-            launchable(&here.to_string_lossy()),
-            "指向真实文件的算可启动：{}",
-            here.display()
-        );
-
-        let root = sandbox("dir-lnk");
-        // 目标是 .ico 的那种快捷方式是安装程序顺手放的，点了只会开一个图片查看器
-        let icon_file = root.join("Charles.ico");
-        std::fs::write(&icon_file, b"not really an icon").unwrap();
-        assert!(
-            !launchable(&icon_file.to_string_lossy()),
-            "指向 .ico 的不算应用"
-        );
-
-        // 名字叫 .lnk 的目录不该被当成快捷方式收进来
-        let programs = root.join("Programs");
-        std::fs::create_dir_all(programs.join("Gone.lnk")).unwrap();
-        let c = conn();
-        assert_eq!(
-            inserted(scan(&c, &[programs], &root.join("icons"), false).unwrap()),
-            0
-        );
     }
 }

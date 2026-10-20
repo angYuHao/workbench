@@ -19,7 +19,7 @@ export function launchApp(id: number) {
   return invoke<void>("launch_app", { id });
 }
 
-/** 扫一遍开始菜单，把没收录过的程序收进卡片（过滤名单命中的不收） */
+/** 读一遍注册表的已安装程序，把没收录过的加成卡片（过滤名单命中的不收） */
 export function syncInstalledApps() {
   return invoke<SyncReport>("sync_installed_apps");
 }

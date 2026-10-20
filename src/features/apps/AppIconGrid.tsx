@@ -17,7 +17,7 @@ interface Props {
 
 export default function AppIconGrid({ apps, selectMode, selectedIds, onToggleSelect, onLaunched }: Props) {
   if (apps.length === 0) {
-    return <Empty description="还没收录到程序：点「重新同步」从开始菜单再读一遍，或用「添加程序」手动填" />;
+    return <Empty description="还没收录到程序：点「重新同步」从注册表再读一遍，或用「添加程序」手动填" />;
   }
 
   return (
