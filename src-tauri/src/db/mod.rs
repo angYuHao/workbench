@@ -57,7 +57,7 @@ fn seed(conn: &Connection) -> AppResult<()> {
             r.get(0)
         })?;
     if app_count == 0 {
-        for (i, name) in ["办公软件", "开发工具", "文档", "压缩包", "图片", "其他"]
+        for (i, name) in ["办公软件", "开发工具", "文档", "压缩包", "图片"]
             .iter()
             .enumerate()
         {
@@ -87,7 +87,6 @@ fn seed(conn: &Connection) -> AppResult<()> {
             ("文档", "", ".docx,.pdf,.xlsx,.pptx,.txt,.md"),
             ("压缩包", "", ".zip,.rar,.7z"),
             ("图片", "", ".png,.jpg,.jpeg,.gif"),
-            ("其他", "", ""),
         ];
         for (i, (cat, kw, ext)) in rules.iter().enumerate() {
             conn.execute(

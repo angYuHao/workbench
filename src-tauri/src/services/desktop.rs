@@ -121,7 +121,10 @@ fn scan_directory(
             String::new()
         };
         let cat_ext = category_ext(is_lnk, &ext, &target_ext);
-        let category = match_category(&display_name, cat_ext, rules);
+        // 没有规则命中就不算一个待整理项：不凭空造分类，也不在页面上留一张没归属的卡片
+        let Some(category) = match_category(&display_name, cat_ext, rules) else {
+            continue;
+        };
         let own = path.to_string_lossy();
         // 先抽快捷方式自己（那才是桌面上显示的那张），抽不到再退回解析出来的目标
         let icon_path = extract_icon(icon_dir, &[own.as_ref(), target.as_str()]);
@@ -595,20 +598,22 @@ fn category_ext<'a>(is_lnk: bool, own_ext: &'a str, target_ext: &'a str) -> &'a 
     }
 }
 
-/// 关键词优先于扩展名（规则里的扩展名可带点），都不命中则归入「其他」
-pub(crate) fn match_category(name: &str, ext: &str, rules: &[DesktopRule]) -> String {
+/// 关键词优先于扩展名（规则里的扩展名可带点）。**都不命中就是没归属** ——
+/// 回 None，扫描那一步直接把这项丢掉：没规则的东西不该出现在整理清单里，
+/// 更不该被塞进一个凭空造出来的「其他」分类。规则里真有一条叫「其他」的，它就是个普通分类名。
+pub(crate) fn match_category(name: &str, ext: &str, rules: &[DesktopRule]) -> Option<String> {
     let name_lower = name.to_lowercase();
     for r in rules.iter().filter(|r| r.enabled) {
         if rule_tokens(&r.keywords).any(|k| name_lower.contains(&k)) {
-            return r.category.clone();
+            return Some(r.category.clone());
         }
     }
     for r in rules.iter().filter(|r| r.enabled) {
         if rule_tokens(&r.extensions).any(|e| e.trim_start_matches('.') == ext) {
-            return r.category.clone();
+            return Some(r.category.clone());
         }
     }
-    "其他".to_string()
+    None
 }
 
 fn map_organize_log(r: &Row) -> rusqlite::Result<OrganizeLog> {
@@ -714,14 +719,15 @@ mod tests {
             rule("废弃", Some("pdf"), None, false),
         ];
         // 名字里带「发票」就先按关键词归报销，哪怕扩展名也命中文档
-        assert_eq!(match_category("12月发票.pdf", "pdf", &rules), "报销");
-        assert_eq!(match_category("手册.pdf", "pdf", &rules), "文档");
+        assert_eq!(match_category("12月发票.pdf", "pdf", &rules).as_deref(), Some("报销"));
+        assert_eq!(match_category("手册.pdf", "pdf", &rules).as_deref(), Some("文档"));
         // 规则里的扩展名带不带点、大小写都算同一个
-        assert_eq!(match_category("手册.DOCX", "docx", &rules), "文档");
-        assert_eq!(match_category("看不懂的", "bin", &rules), "其他");
+        assert_eq!(match_category("手册.DOCX", "docx", &rules).as_deref(), Some("文档"));
+        // 谁都没撞上就是没归属，不兜底造一个「其他」
+        assert_eq!(match_category("看不懂的", "bin", &rules), None);
         // 关键词只有空格时不该把什么都吃掉
         let blank = vec![rule("空规则", Some(" , "), None, true)];
-        assert_eq!(match_category("任意", "txt", &blank), "其他");
+        assert_eq!(match_category("任意", "txt", &blank), None);
     }
 
     #[test]
@@ -729,23 +735,30 @@ mod tests {
         let rules = vec![
             rule("图片", None, Some(".jpg,.png,.gif,.svg,.ico,.cur"), true),
             rule("文档", None, Some(".doc,.pdf"), true),
-            rule("其他", None, None, true),
+            rule("快捷方式", None, Some(".lnk"), true),
         ];
-        // Cpolar Web UI.lnk 就是这样：Windows 自己报的 TargetPath 是安装器缓存里的 app.ico
+        // Cpolar Web UI.lnk 就是这样：Windows 自己报的 TargetPath 是安装器缓存里的 app.ico。
+        // 按 .lnk 自己算，所以它归「快捷方式」而不是图片
         assert_eq!(category_ext(true, "lnk", "ico"), "lnk");
         assert_eq!(
-            match_category("Cpolar Web UI", category_ext(true, "lnk", "ico"), &rules),
-            "其他"
+            match_category("Cpolar Web UI", category_ext(true, "lnk", "ico"), &rules).as_deref(),
+            Some("快捷方式")
         );
         // 指向文档的快捷方式照旧跟着目标走
         assert_eq!(category_ext(true, "lnk", "pdf"), "pdf");
-        assert_eq!(match_category("报告", category_ext(true, "lnk", "pdf"), &rules), "文档");
+        assert_eq!(
+            match_category("报告", category_ext(true, "lnk", "pdf"), &rules).as_deref(),
+            Some("文档")
+        );
         // 解析不出扩展名、或者快捷方式套快捷方式，都按 .lnk 自己算
         assert_eq!(category_ext(true, "lnk", ""), "lnk");
         assert_eq!(category_ext(true, "lnk", "lnk"), "lnk");
         // 真正的图片文件不受这条影响
         assert_eq!(category_ext(false, "ico", ""), "ico");
-        assert_eq!(match_category("logo", category_ext(false, "ico", ""), &rules), "图片");
+        assert_eq!(
+            match_category("logo", category_ext(false, "ico", ""), &rules).as_deref(),
+            Some("图片")
+        );
     }
 
     #[test]
@@ -753,7 +766,7 @@ mod tests {
         let dir = sandbox("self-exe");
         let own_file = touch(&dir, "workbench.exe");
         touch(&dir, "别的.exe");
-        let rules = vec![rule("其他", None, None, true)];
+        let rules = vec![rule("程序", None, Some(".exe"), true)];
         let icon_dir = dir.join("icons");
         std::fs::create_dir_all(&icon_dir).unwrap();
         let own = OwnExe {
@@ -781,6 +794,29 @@ mod tests {
         let mut blind = Vec::new();
         scan_directory(&s(&dir), 0, &rules, &icon_dir, None, &mut blind);
         assert_eq!(blind.len(), 2, "认不出自己时一项都不该被跳掉");
+    }
+
+    /// 没有规则命中就不成项：整理清单和页面上都不该冒出一张「没归属」的卡片，
+    /// 也不该为此凭空造一个「其他」分类
+    #[test]
+    fn the_scanner_drops_anything_no_rule_covers() {
+        let dir = sandbox("no-rule");
+        touch(&dir, "报告.pdf");
+        touch(&dir, "看不懂的.bin");
+        let rules = vec![rule("文档", None, Some(".pdf"), true)];
+        let icon_dir = dir.join("icons");
+        std::fs::create_dir_all(&icon_dir).unwrap();
+
+        let mut items = Vec::new();
+        scan_directory(&s(&dir), 0, &rules, &icon_dir, None, &mut items);
+
+        assert_eq!(
+            items.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(),
+            vec!["报告.pdf"],
+            "扩展名没撞上规则的那份整个不该出现"
+        );
+        assert_eq!(items[0].category, "文档");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 造一套「已经整理过」的样子：`桌面整理\文档\报告.pdf` 摆在那儿，

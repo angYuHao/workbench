@@ -154,7 +154,7 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
             ))}
             {!rules.length && (
               <div className="label" style={{ marginTop: 8 }}>
-                还没有分类规则：扫出来的东西都会先进「其他」这个文件夹。点上面的「分类规则」加一条就有别的去向。
+                还没有分类规则：没有规则命中就什么都不整理。点上面的「分类规则」加一条。
               </div>
             )}
           </div>
@@ -164,7 +164,7 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
           <div className="org-summary">
             <span className="chip">桌面 {items.length} 项</span>
             <span className="label">
-              下面是按分类规则算出来的去向；要改某一项归到哪儿，点「一键整理」在确认窗口里逐条改。
+              只有撞上分类规则的项才会出现在这里；要改某一项归到哪儿，点「一键整理」在确认窗口里逐条改。
             </span>
           </div>
           {scanning ? (
@@ -173,7 +173,13 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
               <span className="label">正在扫描桌面（含子文件夹）…</span>
             </div>
           ) : visible.length === 0 ? (
-            <Empty description={items.length ? `「${activeCat}」下暂时没有任何东西` : "桌面是空的，没什么可整理"} />
+            <Empty
+              description={
+                items.length
+                  ? `「${activeCat}」下暂时没有任何东西`
+                  : "桌面上没有撞上分类规则的东西"
+              }
+            />
           ) : (
             <div className="org-grid">
               {visible.map((it) => (
@@ -218,8 +224,6 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
                   size="small"
                   style={{ width: 130 }}
                   value={record.category}
-                  // 这一项不在规则里（规则都没命中）时，框里说的是它默认会去哪儿，不是一个选项
-                  placeholder={`默认「${record.category}」`}
                   options={categoryOptions}
                   onChange={(v) => setCategory(record, v as string)}
                 />
@@ -233,8 +237,7 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
             整理只搬文件，不会把它们登记到「应用」页。
           </span>
           <span className="label">
-            下拉里只有分类规则的那些分类名。某一项一条规则都没撞上时，框里显示的是它默认的去向，不是选项；
-            想让这种文件也归到某个分类，去「分类规则」里加一条。
+            只有撞上分类规则的项才会出现在这里：想多整理一类文件，去「分类规则」里加一条。
           </span>
         </div>
       </Modal>
