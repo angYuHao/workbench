@@ -11,7 +11,8 @@ export default function App() {
 
   useEffect(() => {
     loadLocalPrefs();
-    // 热键装载失败要说出来：默认键被占的话，用户以为有热键其实没有，比没提示更糟
+    // 装载热键不再靠抛错提示：默认键被占是常事，每次都弹一句反而成了噪音。
+    // 「挂的是哪个键、有没有生效」写在设置那一行里，去看得到、也看得懂
     loadWakeHotkey().catch((e) => message.error(String(e)));
   }, [loadLocalPrefs, loadWakeHotkey]);
 

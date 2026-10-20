@@ -113,8 +113,17 @@ function HotkeyRecorder({
 
 /** 开关状态和落库都在 settings store 里，这里只补一句结果提示 */
 export default function StartupSection() {
-  const { autostart, closeToTray, wakeHotkey, toggleAutostart, toggleCloseToTray, bindWakeHotkey, dropWakeHotkey } =
-    useSettingsStore();
+  const {
+    autostart,
+    closeToTray,
+    wakeHotkey,
+    wakeHotkeyBound,
+    wakeHotkeyError,
+    toggleAutostart,
+    toggleCloseToTray,
+    bindWakeHotkey,
+    dropWakeHotkey,
+  } = useSettingsStore();
 
   const handleAutostart = async (on: boolean) => {
     try {
@@ -136,10 +145,11 @@ export default function StartupSection() {
 
   const handleBind = async (key: string) => {
     try {
-      await bindWakeHotkey(key);
-      message.success(`唤醒快捷键已设为 ${key}`);
+      const r = await bindWakeHotkey(key);
+      if (r.bound) message.success(`唤醒快捷键已设为 ${r.key}`);
+      // 后端不再靠抛错报「被占了」：换键失败时原来那个键已经挂回去，照实说现在生效的是哪个
+      else message.error(r.error);
     } catch (e) {
-      // 被别的程序占了就照实说，别留下「设了但没生效」
       message.error(String(e));
     }
   };
@@ -147,7 +157,7 @@ export default function StartupSection() {
   const handleClear = async () => {
     try {
       await dropWakeHotkey();
-      message.success("已清除唤醒快捷键");
+      message.success("已清除唤醒快捷键：下次启动也不会再装默认键");
     } catch (e) {
       message.error(String(e));
     }
@@ -185,8 +195,15 @@ export default function StartupSection() {
           <div className="settings-line-title">唤醒快捷键</div>
           <div className="settings-line-desc">
             窗口收进托盘之后按一下就回来。点右边的框、再按一个组合键就换好了；必须带一个修饰键，
-            光按 Ctrl/Alt/Shift 不算。默认 Alt+Space，注册不上就是被别的程序占了，换一个就行
+            光按 Ctrl/Alt/Shift 不算。
           </div>
+          {!!wakeHotkey && !wakeHotkeyBound && (
+            <div className="settings-line-desc">
+              框里这个 <b>{wakeHotkey}</b> 现在没挂上：{wakeHotkeyError || "多半是被别的程序占了"}。
+              换一个组合键，或点「清除」先不要热键。
+            </div>
+          )}
+          {!wakeHotkey && <div className="settings-line-desc">现在没有唤醒快捷键：点右边的框、按一个组合键就有。</div>}
         </div>
         <HotkeyRecorder value={wakeHotkey} onPick={(k) => void handleBind(k)} onClear={() => void handleClear()} />
       </div>
