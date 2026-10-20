@@ -14,7 +14,7 @@ import type { SyncReport } from "../../types";
 const SYSTEM_KEY = "filter_system_apps";
 
 /**
- * 应用过滤名单：读注册表同步时命中就不收。
+ * 应用过滤名单：同步时命中就不收——两遍采集（注册表卸载项、开始菜单快捷方式）都受它管。
  * 一条模式就是个小写子串，程序名、安装路径、注册表键名里任意一段对上就算。
  */
 export default function AppFilterSection() {
@@ -148,7 +148,7 @@ export default function AppFilterSection() {
         <div className="settings-line-text">
           <div className="settings-line-title">试算一下</div>
           <div className="settings-line-desc">
-            拿现在的名单重扫一遍注册表，只报数不写库：看看会收多少、又挡了谁。
+            拿现在的名单重扫一遍（注册表卸载项 + 开始菜单快捷方式），只报数不写库：看看会收多少、又挡了谁。
           </div>
           {report && (
             <div className="settings-line-desc">

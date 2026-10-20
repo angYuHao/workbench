@@ -2,7 +2,12 @@
 //!
 //! `HKLM/HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall` 四个视图（两个 hive ×
 //! 32/64 位视图）是 Windows 自己记「装了什么」的地方：装过的程序一个都跑不掉，还带得到
-//! 版本和发行商；没装过的绿色版不在这里。
+//! 版本和发行商；但装过没写卸载项的那些不在这里（下一段就是补这个的）。
+//!
+//! 但注册表只记「装过的」：商店应用（WSL 那类）和从没跑过安装程序的绿色版压根没有卸载项。
+//! 所以还有**第二遍**——开始菜单里没被第一遍认领走的 .lnk 也收成卡片，来源仍标 `startmenu`。
+//! 已经被某个注册表条目当过目标的 .lnk 不会再收一遍；解出来的目标不是「能跑的东西」（.chm 帮助、
+//! .htm 说明这种附属文件）也不收；系统那条过滤和手动名单在这一遍一样生效。
 //!
 //! 注册表的弱点在「怎么打开它」：`InstallLocation` 常常是空的，`DisplayIcon` 又经常指着
 //! 卸载器图标（`…\uninstallerIcon.ico`、`app.exe,0`）。所以启动目标按六级找：
@@ -43,7 +48,7 @@ const VIEWS: [(Hive, Arch); 4] = [
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncReport {
-    /// 注册表里读到多少条有名字的卸载项（32/64 两份都算在里面）
+    /// 候选总数：注册表读到的卸载项 + 没被注册表认领的开始菜单快捷方式
     pub scanned: usize,
     /// 本次收进来的（试算时是「会收进来的」）
     pub inserted: usize,
@@ -84,6 +89,8 @@ pub(crate) struct Entry {
 /// 快捷方式索引里的一条：名字（已归一化）、.lnk 自己、解析出的真目标
 #[derive(Debug, Clone)]
 pub(crate) struct Shortcut {
+    /// .lnk 的文件名（不带后缀）：第二遍采集时它就是卡片名字
+    pub name: String,
     pub key: String,
     pub lnk: String,
     pub target: String,
@@ -193,6 +200,9 @@ pub(crate) fn plan(
     let system_root = system_root();
     let _ = std::fs::create_dir_all(icon_dir);
 
+    // 已经被注册表那一遍认领走的 .lnk：第二遍不能再把它当新程序
+    let mut claimed: HashSet<String> = HashSet::new();
+
     // 「见过」按两种写法算：卡片存的目标，以及条目的名字
     //（开始菜单那批存的是解析出的 exe，注册表这条常常是同一个文件）
     let mut known: HashSet<String> = HashSet::new();
@@ -204,7 +214,7 @@ pub(crate) fn plan(
     }
 
     let mut report = SyncReport {
-        scanned: entries.len(),
+        scanned: 0,
         inserted: 0,
         filtered: 0,
         already: 0,
@@ -251,8 +261,54 @@ pub(crate) fn plan(
         }
         known.insert(key);
         known.insert(target_key);
+        if resolved.found == Found::Shortcut {
+            claimed.insert(path_key(&resolved.icons[0]));
+        }
         report.inserted += 1;
     }
+
+    // 第二遍：注册表没认领的快捷方式也收成卡片。商店应用（WSL、各种 Store 包）在开始菜单里都有系统
+    // 自己生成的 .lnk，可它们不写卸载项；没装过的绿色版也一样只有快捷方式。这两类是「设置里能看到、
+    // 我们这页没有」的主要缺口。系统那条过滤和手动名单在这一遍一样生效，
+    // 所以 system32 那些自带工具不会跟着进来。
+    for sc in shortcuts {
+        let lnk_key = path_key(&sc.lnk);
+        if claimed.contains(&lnk_key) {
+            continue;
+        }
+        report.scanned += 1;
+        let target_key = path_key(&sc.target);
+        if known.contains(&sc.key) || known.contains(&target_key) {
+            report.already += 1;
+            continue;
+        }
+        // 借用注册表那套判定：路径拿 .lnk 自己、目标拿解析出的真目标
+        let probe = Entry {
+            name: sc.name.clone(),
+            display_icon: sc.lnk.clone(),
+            reg_key: sc.lnk.clone(),
+            ..Default::default()
+        };
+        if hits(&probe, &sc.target, &filters, &system_root) {
+            report.filtered += 1;
+            if report.samples.len() < SAMPLES {
+                report.samples.push(sc.name.clone());
+            }
+            continue;
+        }
+        if !dry {
+            let icon = extract_icon(icon_dir, &[sc.lnk.as_str(), sc.target.as_str()]);
+            conn.execute(
+                "INSERT INTO apps (name, target, source, icon_path) VALUES (?1, ?2, 'startmenu', ?3)",
+                params![sc.name, sc.target, icon],
+            )?;
+        }
+        known.insert(sc.key.clone());
+        known.insert(target_key);
+        known.insert(lnk_key);
+        report.inserted += 1;
+    }
+    report.scanned += entries.len();
 
     report.total = if dry {
         count_rows(conn)? + report.inserted
@@ -665,6 +721,22 @@ fn is_uninstaller(path: &str) -> bool {
     name.starts_with("unins") || name.contains("uninstall") || name.contains("installer") || name.contains("卸载")
 }
 
+/// 快捷方式解析出来的目标得是「能跑的东西」：exe、脚本、安装包，或者还是那个 .lnk
+///（商店应用的快捷方式解不出真 exe，这时 .lnk 自己就是入口，ShellExecute 会替我们解析）。
+/// 帮助文档 .chm、网页 .htm 那类附属文件不算应用：它们是「某程序附带的说明书」，
+/// 排成一排只会把这一页变成文档目录。
+fn program_target(target: &str) -> bool {
+    if target.contains("://") {
+        return true;
+    }
+    let p = Path::new(target);
+    p.is_file()
+        && matches!(
+            extension_of(p).as_str(),
+            "exe" | "lnk" | "bat" | "cmd" | "com" | "scr" | "msi" | "appref-ms"
+        )
+}
+
 fn launchable(target: &str) -> bool {
     if target.contains("://") {
         return true;
@@ -699,8 +771,8 @@ fn collect_shortcuts(dir: &Path, depth: usize, out: &mut Vec<Shortcut>) {
             continue;
         }
         let target = launch_target(&path);
-        // 解析不出可启动目标的（目标文件被删了、指向一个目录）不进索引
-        if !launchable(&target) {
+        // 解不出「能跑的东西」的不进索引：目标文件被删了、指向目录、或只是某个程序的帮助文档
+        if !program_target(&target) {
             continue;
         }
         let stem = path
@@ -708,6 +780,7 @@ fn collect_shortcuts(dir: &Path, depth: usize, out: &mut Vec<Shortcut>) {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or(file_name);
         out.push(Shortcut {
+            name: stem.clone(),
             key: name_key(&stem),
             lnk: path.to_string_lossy().to_string(),
             target,
@@ -829,6 +902,88 @@ mod tests {
     }
 
     /// 名单里的模式常是从卡片名字照抄的，带着括号和版本号：这种写法也得命中名字
+    /// 假 .lnk：resolve_lnk 解不开，于是目标就是它自己——正好当「只有快捷方式的程序」用
+    fn fake_lnk(dir: &Path, name: &str) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, b"not a real shell link").unwrap();
+        p
+    }
+
+    /// 第二遍采集：注册表没写卸载项、只有快捷方式的东西（商店应用和绿色版）也进卡片
+    /// 帮助文档不是应用：`.chm` / `.htm` 那种附属快捷方式不该长成卡片
+    #[test]
+    fn a_doc_shortcut_is_not_an_app() {
+        let dir = sandbox("doc-lnk");
+        let exe = touch(&dir, "app.exe");
+        let chm = touch(&dir, "Guide.chm");
+        let htm = touch(&dir, "notes.htm");
+        let lnk = fake_lnk(&dir, "Store App.lnk");
+
+        assert!(program_target(&exe));
+        assert!(
+            program_target(&lnk.to_string_lossy()),
+            "解不出真目标的 .lnk 自己就是入口（商店应用全靠它）"
+        );
+        assert!(program_target("https://example.com/"));
+        assert!(!program_target(&chm), "帮助文档不该收成应用");
+        assert!(!program_target(&htm));
+        assert!(!program_target(""));
+    }
+
+    #[test]
+    fn start_menu_shortcuts_the_registry_never_mentioned_also_become_cards() {
+        let dir = sandbox("orphan-lnk");
+        let programs = dir.join("Programs");
+        std::fs::create_dir_all(&programs).unwrap();
+        let green = fake_lnk(&programs, "Green App.lnk");
+        let scs = shortcut_index(std::slice::from_ref(&programs));
+        let c = conn();
+
+        let report = plan(&c, &[], &scs, &dir.join("icons"), false).unwrap();
+        assert_eq!(report.inserted, 1, "{report:?}");
+        assert_eq!(rows(&c), vec!["Green App|startmenu|"]);
+        let again = plan(&c, &[], &scs, &dir.join("icons"), false).unwrap();
+        assert_eq!(again.inserted, 0, "再来一次不该长出第二张：{again:?}");
+        assert_eq!(again.already, 1);
+        assert!(green.is_file());
+    }
+
+    /// 注册表那条已经靠这个 .lnk 认出目标了，第二遍就不能再收一张
+    #[test]
+    fn a_shortcut_the_registry_row_already_uses_is_not_collected_again() {
+        let dir = sandbox("claimed-lnk");
+        let programs = dir.join("Programs");
+        std::fs::create_dir_all(&programs).unwrap();
+        fake_lnk(&programs, "Loomy.lnk");
+        let scs = shortcut_index(std::slice::from_ref(&programs));
+        let c = conn();
+
+        let report = plan(&c, &[entry("Loomy")], &scs, &dir.join("icons"), false).unwrap();
+        assert_eq!(report.inserted, 1, "{report:?}");
+        assert_eq!(rows(&c), vec!["Loomy|registry|"], "同一个程序不该收两张");
+    }
+
+    /// 开始菜单里那堆系统自带工具照样归「系统应用」那条管；开关关掉才收
+    #[test]
+    fn start_menu_system_tools_stay_filtered_by_the_same_switch() {
+        let dir = sandbox("sys-lnk");
+        let programs = dir.join("Programs");
+        std::fs::create_dir_all(&programs).unwrap();
+        fake_lnk(&programs, "讲述人.lnk");
+        let mut scs = shortcut_index(std::slice::from_ref(&programs));
+        scs[0].target = Path::new(&system_root()).join("system32").join("narrator.exe").to_string_lossy().to_string();
+        let icons = dir.join("icons");
+
+        let c = conn();
+        let report = plan(&c, &[], &scs, &icons, false).unwrap();
+        assert_eq!(report.filtered, 1, "{report:?}");
+        assert_eq!(report.samples, vec!["讲述人".to_string()]);
+        assert_eq!(rows(&c), Vec::<String>::new());
+
+        crate::services::settings::set_setting(&c, SYSTEM_SWITCH, "0").unwrap();
+        let off = plan(&c, &[], &scs, &icons, false).unwrap();
+        assert_eq!(off.inserted, 1, "关掉开关就该把它收回来：{off:?}");
+    }
     #[test]
     fn a_pattern_copied_from_the_card_name_still_blocks_it() {
         let dir = sandbox("punct-pattern");
@@ -918,6 +1073,7 @@ mod tests {
         let real = touch(&dir, r"Loomy\loomy.exe");
         let install = dir.join("Loomy");
         let sc = Shortcut {
+            name: "Loomy".into(),
             key: name_key("Loomy"),
             lnk: dir.join("Loomy.lnk").to_string_lossy().to_string(),
             target: real.clone(),
@@ -1188,6 +1344,7 @@ mod tests {
         assert_eq!(path_key(r"F:\Program\App.exe"), path_key("F:/Program/App.exe"));
 
         let sc = [Shortcut {
+            name: "Loomy".into(),
             key: name_key("Loomy"),
             lnk: "L:\\Loomy.lnk".into(),
             target: "L:\\Loomy\\loomy.exe".into(),
@@ -1292,6 +1449,16 @@ mod tests {
         let with_meta: i64 = c
             .query_row("SELECT COUNT(*) FROM apps WHERE description IS NOT NULL", [], |r| r.get(0))
             .unwrap();
+
+        // 两个来源各收了多少：第二遍（快捷方式）补进来的商店应用和绿色版要看得到
+        let by_source: Vec<(String, i64)> = c
+            .prepare("SELECT source, COUNT(*) FROM apps GROUP BY source ORDER BY source")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        println!("  来源分布：{:?}", by_source);
         println!(
             "收进来 {} 个、库里原有 {} 个、被挡 {} 个、找不到目标的 {} 个；有图标 {with_icon} 张、有版本/发行商 {with_meta} 条",
             report.inserted, report.already, report.filtered, report.unresolved

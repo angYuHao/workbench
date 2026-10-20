@@ -33,7 +33,7 @@ const emptyApp: AppEntry = {
 const PROGRAM_EXTS = ["lnk", "exe", "app", "msi", "bat", "cmd", "com", "scr"];
 
 /**
- * 「应用」页：把注册表里的已安装程序收成卡片，双击打开。
+ * 「应用」页：注册表里的已安装程序 + 开始菜单里没人认领的快捷方式收成卡片，双击打开。
  * 数据在打开时同步一次（只增不改），分类按用途交给智能分类，跟桌面上的分类规则无关。
  */
 export default function AppsView() {
@@ -68,8 +68,8 @@ export default function AppsView() {
       await loadApps();
       const skipped = r.filtered > 0 ? `，按过滤名单跳过 ${r.filtered} 个` : "";
       const lost = r.unresolved > 0 ? `，${r.unresolved} 个认不出要打开什么` : "";
-      if (r.inserted > 0) message.success(`从注册表新收录 ${r.inserted} 个程序${skipped}${lost}`);
-      else if (manual) message.info(`注册表里没有新程序，当前 ${r.total} 个${skipped}${lost}`);
+      if (r.inserted > 0) message.success(`从注册表和开始菜单新收录 ${r.inserted} 个程序${skipped}${lost}`);
+      else if (manual) message.info(`注册表和开始菜单都没有新程序，当前 ${r.total} 个${skipped}${lost}`);
     } catch (e) {
       message.error(String(e));
     } finally {

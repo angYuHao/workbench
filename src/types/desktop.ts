@@ -49,7 +49,7 @@ export interface DesktopRule {
 
 /** 一次注册表同步（或试算）的账单 */
 export interface SyncReport {
-  /** 注册表里读到多少条卸载项（32/64 两份视图都算） */
+  /** 候选总数：注册表读到的卸载项 + 没被注册表认领的开始菜单快捷方式 */
   scanned: number;
   /** 本次收进来的；试算时是「会收进来的」 */
   inserted: number;

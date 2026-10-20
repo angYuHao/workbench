@@ -39,9 +39,11 @@ grep -c 'commands::' src/lib.rs
 
 同步命令（非 async）跑在主线程上，tao/WebView2 已经把 COM 起好了，所以 `scan_desktop`、`sync_installed_apps` 在应用里是好的。**在测试线程里直接调这两个 API 会全灭**，要照着 `services::installed::tests::the_real_registry_lists_installed_programs` 那样先 `CoInitializeEx(None, COINIT_APARTMENTTHREADED)`；那条 `#[ignore]` 的测试就是拿真注册表核对这一步的（本机读出 352 条卸载项：挡掉 232、收进来 60、抽到 59 张图标、35 条认不出目标）。
 
-## 「应用」页的数据源是注册表，不是目录扫描
+## 「应用」页的数据源：注册表四视图 + 开始菜单补一遍
 
 `services/installed.rs` 读 `HKLM`/`HKCU` 的 `...\CurrentVersion\Uninstall` **四个视图**（32 位程序在 `WOW6432Node` 那份里，只读一份会漏一半），只读层在 `win/registry.rs`（`KEY_READ=131097`、`KEY_WOW64_32KEY=512`、`KEY_WOW64_64KEY=256`、`ERROR_NO_MORE_ITEMS=259` 这些常量是从本地 `windows-0.58.0` 源码里查的，改之前先 grep，别照记忆写）。
+
+第二遍采集的是 `shortcut_index()` 里**没被第一遍认领**的 .lnk：商店应用和绿色版不写卸载项，光读注册表就缺这一类。两道闸门防止重复和不该长的卡片——`claimed`（某个注册表条目已经拿这个 .lnk 当过目标）和 `program_target()`（解出来的目标得是 exe / 脚本 / .lnk 这种能跑的东西，.chm 帮助、.htm 说明不算应用）；系统过滤和手动名单在第二遍一样走一遍，所以 `C:\WINDOWS\system32` 那堆自带工具不会跟着进来。
 
 注册表知道「装了什么」，说不准「怎么打开」，所以目标按六级找：`DisplayIcon` 里那个真存在的 exe → `DisplayIcon` 指的是快捷方式的 → 开始菜单同名快捷方式（名字带厂商前缀也认，`Nsight Compute 2026.1.0` 对 `NVIDIA Nsight Compute 2026.1.0`）→ 安装目录自己就是 exe → 已知那几个目录（安装目录、**卸载器所在目录**、`DisplayIcon` 所在目录）里名字对得上的 exe → 卸载串里那个不是卸载器的 exe；全落空就用目录本身（点开是文件夹），一条路径都没有的算 `unresolved` 报数、不收卡片。`InstallLocation` 为空是常态，所以卸载器那个 `unins000.exe` 虽然不能当目标，**它所在的目录一定要拿去翻主程序**（Charles、Navicat 这类就是这么找回来的）。还有一条：他自己搬过目录的软件，注册表里留的是老路径，`relocated` 会退一层再认一次。两处踩过的坑：
 
