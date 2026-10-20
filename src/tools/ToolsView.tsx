@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Search } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { findTool, TOOLS } from "./registry";
-import { Button, Empty, Input, pressable } from "../ui";
+import { Button, Empty, pressable, SearchBox } from "../ui";
 
 export default function ToolsView() {
   const { toolId } = useParams();
@@ -45,14 +45,7 @@ export default function ToolsView() {
     <div className="page">
       <div className="toolbar">
         <h2 className="toolbar-title">工具</h2>
-        <Input
-          allowClear
-          prefix={<Search size={14} />}
-          placeholder="搜索内置工具"
-          style={{ width: 220 }}
-          value={keyword}
-          onChange={setKeyword}
-        />
+        <SearchBox placeholder="搜索内置工具" value={keyword} onChange={setKeyword} />
       </div>
       <div className="content-pane">
         {visible.length === 0 ? (

@@ -1,24 +1,36 @@
 import { useEffect, useMemo, useState } from "react";
-import { Globe, Pencil, Plus, Search, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
+import { Plus, Sparkles, Square, Wand2 } from "lucide-react";
 import { useBookmarksStore } from "../../stores/bookmarks";
-import { openUrl } from "../../api/bookmarks";
+import { blockBookmarks, openUrl } from "../../api/bookmarks";
 import { deleteCategories, deleteCategory } from "../../api/categories";
-import {
-  blockBookmarks,
-  emptyBookmarkTrash,
-  getBookmarkTrashCount,
-  restoreBookmarkTrash,
-} from "../../api/bookmarks";
-import CategoryTree, { ITEM_MIME, type CategoryNode } from "../../shared/CategoryTree";
+import CategoryTree, { type CategoryNode } from "../../shared/CategoryTree";
 import { useCategoryScaffold } from "../../shared/useCategoryScaffold";
 import SelectionBar from "../../shared/SelectionBar";
-import SelectTick from "../../shared/SelectTick";
 import BookmarkAnalysisModal from "./BookmarkAnalysisModal";
+import BookmarkCard from "./BookmarkCard";
 import SmartCategorizeModal from "../../shared/SmartCategorizeModal";
 import { useIdSelection } from "../../shared/useIdSelection";
 import { useBookmarkAnalysis } from "./useBookmarkAnalysis";
+import useBookmarkTrash from "./useBookmarkTrash";
 import { useSmartCategorize } from "../../shared/useSmartCategorize";
-import { Button, Checkbox, Dropdown, Form, FormItem, Input, Modal, ModalConfirm, Select, Space, Spin, TextArea, message, pressable, useForm } from "../../ui";
+import { useSmartScope } from "../../shared/useSmartScope";
+import {
+  Button,
+  Checkbox,
+  Dropdown,
+  Form,
+  FormItem,
+  Input,
+  message,
+  Modal,
+  ModalConfirm,
+  SearchBox,
+  Select,
+  Space,
+  Spin,
+  TextArea,
+  useForm,
+} from "../../ui";
 import type { Bookmark } from "../../types";
 
 const emptyBookmark: Bookmark = {
@@ -37,32 +49,6 @@ const BROWSERS = [
   { key: "edge", label: "从 Edge 导入" },
 ];
 
-function Favicon({ url }: { url: string | null }) {
-  const [error, setError] = useState(false);
-  if (!url || error) {
-    return <Globe size={20} color="var(--color-text-secondary)" />;
-  }
-
-  let domain = "";
-  try {
-    domain = new URL(url).hostname;
-  } catch {
-    // 非法网址时退化为图标占位
-  }
-
-  return (
-    <img
-      src={domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : ""}
-      width={20}
-      height={20}
-      alt=""
-      draggable={false}
-      style={{ borderRadius: "var(--radius-icon)", flexShrink: 0 }}
-      onError={() => setError(true)}
-    />
-  );
-}
-
 export default function BookmarksView() {
   const { bookmarks, categories, loading, load, import: doImport, save, remove } =
     useBookmarksStore();
@@ -72,7 +58,7 @@ export default function BookmarksView() {
   const [form] = useForm();
   const selection = useIdSelection();
   const analysis = useBookmarkAnalysis({ onApplied: load });
-  const [trash, setTrash] = useState(0);
+  const trash = useBookmarkTrash({ revision: bookmarks.length, reload: load });
   const smart = useSmartCategorize({
     itemType: "bookmark",
     unit: "网址",
@@ -84,52 +70,6 @@ export default function BookmarksView() {
     // 拉不到要说出来：不然页面一片空白，看着像「没数据」而不是「出错了」
     load().catch((e) => message.error(String(e)));
   }, []);
-
-  // 分析删掉的重复书签进的是回收表：列表一有变化就重新看一眼有没有得撤销
-  useEffect(() => {
-    getBookmarkTrashCount().then(setTrash).catch(() => setTrash(0));
-  }, [bookmarks.length]);
-
-  const restoreTrash = async () => {
-    try {
-      const n = await restoreBookmarkTrash();
-      message.success(`已放回 ${n} 条书签，重复标记会重新出现`);
-      setTrash(0);
-      await load();
-    } catch (e) {
-      message.error(String(e));
-    }
-  };
-
-  // 多选拉黑只挡这几条地址本身；整站屏蔽要在 设置 → 网址黑名单 里写域名
-  const blockSelected = (ids: number[]) => {
-    ModalConfirm({
-      title: `把选中的 ${ids.length} 条网址拉黑？`,
-      content: "拉黑是从页面上藏起来，不删数据：以后导入浏览器收藏夹也不会再进来，取消拉黑原条目带分类和简介一起回来。这里挡的是这几条地址本身，要屏蔽整站请去 设置 → 网址黑名单 填域名（如 douban.com，连子页面一起挡）。",
-      onOk: async () => {
-        try {
-          const n = await blockBookmarks(ids);
-          selection.stop();
-          await load();
-          message.success(`已拉黑，新增 ${n} 条规则`);
-        } catch (e) {
-          message.error(String(e));
-        }
-      },
-    });
-  };
-
-  const dropTrash = () => {
-    ModalConfirm({
-      title: `确认不要这 ${trash} 条被删的重复书签？`,
-      content: "清掉后就只能从数据库备份里找回了。",
-      onOk: async () => {
-        await emptyBookmarkTrash();
-        setTrash(0);
-        message.success("已清掉");
-      },
-    });
-  };
 
   useEffect(() => {
     if (!edit) {
@@ -167,25 +107,30 @@ export default function BookmarksView() {
     );
   }, [bookmarks, activeCategory, keyword]);
 
-  /** 智能分类的「只处理新增」：还没归类的（含堆在「其他」里的）才判，进了真分类的跳过 */
-  const [smartOnlyNew, setSmartOnlyNew] = useState(true);
-  const otherCategoryId = categories.find((c) => c.name === "其他")?.id ?? null;
-  const smartTargets = (onlyNew: boolean) =>
-    visible
-      .filter((b) => !onlyNew || b.categoryId === null || b.categoryId === otherCategoryId)
-      .map((b) => ({ id: b.id, name: b.title, target: null, url: b.url }));
+  const { onlyNew, restart } = useSmartScope({
+    items: visible,
+    categories,
+    unit: "网址",
+    start: smart.start,
+    toSmart: (b) => ({ id: b.id, name: b.title, target: null, url: b.url }),
+  });
 
-  /** 打开（或换口径重开）智能分类窗口。一个都不剩时退回全量：勾画在窗口里，窗口不开他就没地方取消 */
-  const restartSmart = (onlyNew: boolean) => {
-    const list = smartTargets(onlyNew);
-    if (list.length) {
-      setSmartOnlyNew(onlyNew);
-      smart.start(list);
-      return;
-    }
-    setSmartOnlyNew(false);
-    message.info("按「只处理新增」没有要判的网址了：已去掉勾，连已经归好类的一起判");
-    smart.start(smartTargets(false));
+  // 多选拉黑只挡这几条地址本身；整站屏蔽要在 设置 → 网址黑名单 里写域名
+  const blockSelected = (ids: number[]) => {
+    ModalConfirm({
+      title: `把选中的 ${ids.length} 条网址拉黑？`,
+      content: "拉黑是从页面上藏起来，不删数据：以后导入浏览器收藏夹也不会再进来，取消拉黑原条目带分类和简介一起回来。这里挡的是这几条地址本身，要屏蔽整站请去 设置 → 网址黑名单 填域名（如 douban.com，连子页面一起挡）。",
+      onOk: async () => {
+        try {
+          const n = await blockBookmarks(ids);
+          selection.stop();
+          await load();
+          message.success(`已拉黑，新增 ${n} 条规则`);
+        } catch (e) {
+          message.error(String(e));
+        }
+      },
+    });
   };
 
   // 书签这边没有分类规则，一次确认就够
@@ -253,18 +198,18 @@ export default function BookmarksView() {
     });
   };
 
+  /** 双击和 Enter 走同一条：打开、记一次使用、回来刷新列表 */
+  const open = (b: Bookmark) => {
+    openUrl(b.url, b.id)
+      .then(() => load())
+      .catch((e) => message.error(String(e)));
+  };
+
   return (
     <div className="page">
       <div className="toolbar">
         <h2 className="toolbar-title toolbar-title-pane">网页管理</h2>
-        <Input
-          allowClear
-          prefix={<Search size={14} />}
-          placeholder="搜索标题 / 网址 / 说明"
-          style={{ width: 220 }}
-          value={keyword}
-          onChange={setKeyword}
-        />
+        <SearchBox placeholder="搜索标题 / 网址 / 说明" value={keyword} onChange={setKeyword} />
         <div className="toolbar-spacer" />
         {selection.active ? (
           <SelectionBar
@@ -287,7 +232,7 @@ export default function BookmarksView() {
             </Button>
             <Button
               icon={<Sparkles size={16} />}
-              onClick={() => restartSmart(smartOnlyNew)}
+              onClick={() => restart(onlyNew)}
               disabled={visible.length === 0}
             >
               智能分类
@@ -326,13 +271,13 @@ export default function BookmarksView() {
         </div>
 
         <div className="content-pane">
-          {trash > 0 && (
+          {trash.trash > 0 && (
             <div className="smart-foot" style={{ marginBottom: 8 }}>
-              上次分析删掉了 {trash} 条重复书签
-              <Button size="small" type="link" onClick={() => void restoreTrash()}>
+              上次分析删掉了 {trash.trash} 条重复书签
+              <Button size="small" type="link" onClick={() => void trash.restore()}>
                 恢复
               </Button>
-              <Button size="small" type="link" onClick={dropTrash}>
+              <Button size="small" type="link" onClick={trash.drop}>
                 不再恢复
               </Button>
             </div>
@@ -353,80 +298,23 @@ export default function BookmarksView() {
                 gap: 12,
               }}
             >
-              {visible.map((b) => {
-                const checked = selection.selectedIds.has(b.id);
-                return (
-                  <div
-                    key={b.id}
-                    className={
-                      selection.active && checked
-                        ? "card card-hover tile bookmark-card selected"
-                        : "card card-hover tile bookmark-card"
-                    }
-                    draggable
-                    // 按住拖到左边的分类上就是改分类；打开改成双击，单击只在选择模式里用来勾选
-                    // Enter 是键盘上等价的那一下双击（键盘没法双击）
-                    title="双击打开"
-                    aria-label={b.title}
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData(ITEM_MIME, String(b.id));
-                      e.dataTransfer.effectAllowed = "move";
-                    }}
-                    onClick={() => selection.active && selection.toggle(b.id)}
-                    onDoubleClick={() => {
-                      if (selection.active) return;
-                      openUrl(b.url, b.id)
-                        .then(() => load())
-                        .catch((e) => message.error(String(e)));
-                    }}
-                    {...pressable(() => {
-                      if (selection.active) {
-                        selection.toggle(b.id);
-                        return;
-                      }
-                      openUrl(b.url, b.id)
-                        .then(() => load())
-                        .catch((e) => message.error(String(e)));
-                    })}
-                  >
-                    {selection.active && <SelectTick selected={checked} />}
-                    <Favicon url={b.url} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="ellipsis" style={{ fontWeight: 600 }}>
-                        {b.title}
-                        {b.useCount > 0 && <span className="label"> · {b.useCount} 次</span>}
-                      </div>
-                      <div className="ellipsis label">{b.url}</div>
-                      {b.description && (
-                        <div className="label" style={{ marginTop: 2 }}>
-                          {b.description}
-                        </div>
-                      )}
-                    </div>
-                    {!selection.active && (
-                      <Space
-                        size={4}
-                        style={{ alignSelf: "flex-start" }}
-                        onClick={(e) => e.stopPropagation()}
-                        // 双击也拦在这里，不然在编辑按钮上按两下就把网址打开了
-                        onDoubleClick={(e) => e.stopPropagation()}
-                      >
-                        <Pencil className="icon-button" size={15} onClick={() => setEdit(b)} />
-                        <Trash2
-                          className="icon-button"
-                          size={15}
-                          onClick={() =>
-                            ModalConfirm({
-                              title: "确认删除该网址？",
-                              onOk: async () => remove(b.id),
-                            })
-                          }
-                        />
-                      </Space>
-                    )}
-                  </div>
-                );
-              })}
+              {visible.map((b) => (
+                <BookmarkCard
+                  key={b.id}
+                  bookmark={b}
+                  selectMode={selection.active}
+                  selected={selection.selectedIds.has(b.id)}
+                  onToggle={() => selection.toggle(b.id)}
+                  onOpen={() => open(b)}
+                  onEdit={() => setEdit(b)}
+                  onDelete={() =>
+                    ModalConfirm({
+                      title: "确认删除该网址？",
+                      onOk: async () => remove(b.id),
+                    })
+                  }
+                />
+              ))}
             </div>
           )}
         </div>
@@ -465,8 +353,8 @@ export default function BookmarksView() {
         hint="书签不给模型看现有分类，分类名它自己定，并要求整批收到少数几个大类里（8 个封顶、宁宽勿细）。它只拿到标题和网址；名字或分类不满意，直接在这行改。"
         extra={
           <Checkbox
-            checked={smartOnlyNew}
-            onChange={(v) => restartSmart(v)}
+            checked={onlyNew}
+            onChange={(v) => restart(v)}
             label="只判「未分类」和落在「其他」里的，已经进了真分类的跳过"
           />
         }

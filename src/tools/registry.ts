@@ -8,7 +8,7 @@ export interface ToolProps {
   onBack: () => void;
 }
 
-export interface Tool {
+interface Tool {
   id: string;
   name: string;
   description: string;

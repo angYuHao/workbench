@@ -25,6 +25,16 @@ jobs:
       - name: 装前端依赖
         run: npm ci
 
+      # CONTRIBUTING 那四道门，tauri build 只自带 tsc + vite build 这两道（beforeBuildCommand）。
+      # 单测和 clippy 在这儿补上：否则 Rust 侧的逻辑回归能一路打进 Release。
+      # 不加 `-D warnings`：runner 上的工具链比本机新，新 clippy 规则只会让发版莫名变红。
+      - name: 后端单测与 clippy
+        shell: bash
+        run: |
+          cd src-tauri
+          cargo test
+          cargo clippy --all-targets
+
       # tauri build 先跑 beforeBuildCommand（tsc && vite build），再去 GitHub 下 WiX 和 NSIS。
       # 日志本体要 token 才能下，所以失败时把尾巴写成 annotation —— 那个接口匿名可读。
       - name: 编译并打包

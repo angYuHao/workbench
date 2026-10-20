@@ -8,8 +8,7 @@ export interface CategoryNode {
   count: number;
 }
 
-/** 拖动条目时挂在 dataTransfer 上的键：桌面卡片拖到分类名上就是改分类 */
-export const ITEM_MIME = "application/x-workbench-item";
+import { carriesItem, draggedItemId } from "./dragItem";
 
 /**
  * 分类树按「这个分类底下的条目一共被点开过多少次」排：常用的分类排前面。
@@ -40,7 +39,6 @@ interface Props {
   onDelete?: (node: CategoryNode) => void;
   /** 传了才出现「批量删除」：多选后一次交给调用方，怎么确认由它决定 */
   onDeleteMany?: (nodes: CategoryNode[]) => void;
-  addLabel?: string;
   /** 「全部」的真实条数：各分类之和会把未分类的项目漏掉，所以由调用方给 */
   total?: number;
 }
@@ -54,7 +52,6 @@ export default function CategoryTree({
   onDropItem,
   onDelete,
   onDeleteMany,
-  addLabel = "新建分类",
   total,
 }: Props) {
   const [adding, setAdding] = useState(false);
@@ -133,7 +130,7 @@ export default function CategoryTree({
             onClick={() => setAdding(true)}
             style={{ justifyContent: "flex-start", color: "var(--color-text-secondary)", marginBottom: 6 }}
           >
-            {addLabel}
+            新建分类
           </Button>
         )}
         <Item active={selected === null} label="全部" count={shownTotal} onClick={() => onSelect(null)} />
@@ -170,7 +167,7 @@ export default function CategoryTree({
       </div>
 
       <Modal
-        title={editing ? `重命名「${editing.name}」` : addLabel}
+        title={editing ? `重命名「${editing.name}」` : "新建分类"}
         open={adding || !!editing}
         onCancel={close}
         onOk={() => void submit()}
@@ -221,7 +218,7 @@ function Item({
         onDropItem
           ? (e) => {
               // 拖来的得是自家的条目，别的（比如选中的文字）不当落点
-              if (!e.dataTransfer.types.includes(ITEM_MIME)) return;
+              if (!carriesItem(e)) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
               if (!over) setOver(true);
@@ -234,8 +231,8 @@ function Item({
           ? (e) => {
               e.preventDefault();
               setOver(false);
-              const id = Number(e.dataTransfer.getData(ITEM_MIME));
-              if (Number.isInteger(id) && id > 0) void onDropItem(id);
+              const id = draggedItemId(e);
+              if (id !== null) void onDropItem(id);
             }
           : undefined
       }

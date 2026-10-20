@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as api from "../../api/totp";
 import type { TotpAccount } from "../../types";
 
-export interface TotpCodeEntry {
+interface TotpCodeEntry {
   code: string;
   window: number;
   error?: string;

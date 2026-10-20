@@ -1,3 +1,8 @@
+//! 分类表：程序、网址、文件三个模块共用一张 `categories`，靠 `type` 区分取值。
+//!
+//! 改名和删除都不是单表操作：改名要把旧名在分类规则、桌面上的分类文件夹、`organize_logs`
+//! 和卡片目标里一路带走（所以它自己开事务）；删除要一次决定「分类下的条目退回未分类」
+//! 和「要不要连分类规则一起删」。桌面规则 `desktop_rules` 的读存也在这个文件里。
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::AppResult;

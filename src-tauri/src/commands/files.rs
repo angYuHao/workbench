@@ -77,6 +77,5 @@ pub fn open_path(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn reveal_in_explorer(path: String) -> Result<(), String> {
-    crate::win::shell::reveal(&path);
-    Ok(())
+    crate::win::shell::reveal(&path).map_err(|e| e.to_string())
 }

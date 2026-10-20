@@ -4,11 +4,9 @@ import { pressable } from "./pressable";
 interface MenuItem {
   key: string;
   label: string;
-  danger?: boolean;
 }
 
 interface DropdownProps {
-  trigger?: ("click" | "contextMenu")[];
   menu: {
     items: MenuItem[];
     onClick?: (info: { key: string }) => void;
@@ -26,7 +24,7 @@ function clampX(left: number): number {
   return Math.max(MENU_EDGE_GAP, Math.min(left, max));
 }
 
-export function Dropdown({ trigger = ["click"], menu, children }: DropdownProps) {
+export function Dropdown({ menu, children }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const ref = useRef<HTMLDivElement>(null);
@@ -39,24 +37,14 @@ export function Dropdown({ trigger = ["click"], menu, children }: DropdownProps)
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const handleContextMenu = (e: React.MouseEvent) => {
-    if (trigger.includes("contextMenu")) {
-      e.preventDefault();
-      setPos({ x: e.clientX, y: e.clientY });
-      setOpen(true);
-    }
-  };
-
   const handleClick = () => {
-    if (trigger.includes("click")) {
-      const rect = ref.current?.getBoundingClientRect();
-      if (rect) setPos({ x: clampX(rect.left), y: rect.bottom + 4 });
-      setOpen(true);
-    }
+    const rect = ref.current?.getBoundingClientRect();
+    if (rect) setPos({ x: clampX(rect.left), y: rect.bottom + 4 });
+    setOpen(true);
   };
 
   return (
-    <div ref={ref} style={{ display: "inline-block" }} onContextMenu={handleContextMenu} onClick={handleClick}>
+    <div ref={ref} style={{ display: "inline-block" }} onClick={handleClick}>
       {children}
       {open && (
         <div
@@ -91,7 +79,7 @@ export function Dropdown({ trigger = ["click"], menu, children }: DropdownProps)
                 borderRadius: "var(--radius-icon)",
                 cursor: "pointer",
                 fontSize: 14,
-                color: item.danger ? "var(--color-danger)" : "var(--color-text)",
+                color: "var(--color-text)",
                 whiteSpace: "nowrap",
               }}
             >

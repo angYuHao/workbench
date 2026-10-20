@@ -1,3 +1,8 @@
+//! 书签这一页的数据层：从浏览器写在磁盘上的收藏夹文件导入，增删改查，
+//! 加上「拉黑」那套规则（写域名挡整站，写完整网址只挡那一条）。
+//!
+//! 地址归一化只有一份口径（`url_key`）：导入时按它跳过见过的地址，分析时按它找重复组。
+//! 分析删掉的重复条目进的是 `bookmark_trash`（见 bookmark_analysis），不是这里直接删。
 use std::collections::HashMap;
 use std::path::PathBuf;
 

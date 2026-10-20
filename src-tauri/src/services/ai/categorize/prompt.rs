@@ -3,7 +3,8 @@
 
 use crate::models::SmartCategorizeItem;
 
-use super::client::{head, HINT_CHARS};
+use super::client::HINT_CHARS;
+use crate::services::ai::shorten;
 
 
 /// 一次判断的规矩写死在这儿：复用优先、分类数要少、只看用途。
@@ -34,7 +35,7 @@ pub(crate) fn user_prompt(items: &[SmartCategorizeItem], category_names: &[Strin
             obj.insert("id".into(), item.id.into());
             obj.insert("name".into(), serde_json::Value::String(item.name.clone()));
             if let Some(url) = item.url.as_deref().filter(|u| !u.is_empty()) {
-                obj.insert("url".into(), serde_json::Value::String(head(url, HINT_CHARS)));
+                obj.insert("url".into(), serde_json::Value::String(shorten(url, HINT_CHARS)));
             }
             serde_json::Value::Object(obj)
         })

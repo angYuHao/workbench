@@ -22,8 +22,6 @@ interface Options<T> {
   save: (item: T) => Promise<unknown>;
   /** 增删改名之后刷新；桌面是两条一起，书签是 store 的 load */
   reload: () => Promise<void>;
-  /** 树上额外挂的分类名（桌面：规则在用但还没建分类的）。要传稳定引用，否则每次渲染都重算 */
-  ghostNames?: string[];
   /** 改名顺带改写了分类规则时，提示语要说清几条；不给就只报「已改名」 */
   renamed?: (touched: number, name: string) => string;
   /** 有的 store 的 save 自己会刷新（书签），有的不会（桌面）；后者在这里补 */
@@ -32,8 +30,9 @@ interface Options<T> {
 
 /**
  * 分类树那一圈的公共部分：建树 + 计数 + 按使用次数排、新建、改名、拖到分类上改归属。
- * 删除不在这里——桌面要问「要不要连分类规则一起删」、还要处理只有规则没有分类的幽灵节点，
- * 书签那边是完全另一套文案，硬并只会把两边的差异藏进一个开关参数里。
+ * 删除不在这里——两边的确认文案和量词不一样（「网址退回未分类」对「程序退回未分类」），
+ * 删完要重读的东西也不一样（书签只重读列表，应用还要重读分类），
+ * 硬并只会把这些差异藏进一个开关参数里。
  */
 export function useCategoryScaffold<T extends Item>({
   type,
@@ -42,7 +41,6 @@ export function useCategoryScaffold<T extends Item>({
   labelOf,
   save,
   reload,
-  ghostNames,
   renamed,
   afterMove,
 }: Options<T>) {
@@ -52,11 +50,8 @@ export function useCategoryScaffold<T extends Item>({
       name: c.name,
       count: items.filter((i) => i.categoryId === c.id).length,
     }));
-    for (const name of ghostNames ?? []) {
-      if (!nodes.some((n) => n.name === name)) nodes.push({ id: 0, name, count: 0 });
-    }
     return orderByUsage(nodes, items);
-  }, [categories, items, ghostNames]);
+  }, [categories, items]);
 
   const addCategory = async (name: string) => {
     const sort = Math.max(0, ...categories.map((c) => c.sort)) + 1;

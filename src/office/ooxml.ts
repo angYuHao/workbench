@@ -1,7 +1,7 @@
 /** 零依赖读 OOXML（.docx/.xlsx 都是 zip 里装一堆 XML）。
     不装任何包：解压用浏览器原生 DecompressionStream，解析用原生 DOMParser。 */
 
-export interface ZipFile {
+interface ZipFile {
   names: string[];
   read(name: string): Promise<Uint8Array>;
 }
@@ -25,7 +25,7 @@ async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-export async function openZip(buffer: ArrayBuffer): Promise<ZipFile> {
+async function openZip(buffer: ArrayBuffer): Promise<ZipFile> {
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
   if (bytes.length < 22) throw new Error("文件太小，不是有效的 zip");
@@ -112,7 +112,7 @@ export interface SheetCellView {
   rowspan: number;
 }
 
-export interface SheetRowView {
+interface SheetRowView {
   /** Excel 里的真实行号；中间整行空的就不渲染，行号照旧往下跳 */
   n: number;
   height: number | null;
@@ -130,7 +130,7 @@ export interface SheetTable {
 
 export const MAX_ROWS = 300;
 export const MAX_COLS = 40;
-export const DEFAULT_COL_PX = 64;
+const DEFAULT_COL_PX = 64;
 export const MIN_COL_PX = 30;
 export const MAX_COL_PX = 420;
 

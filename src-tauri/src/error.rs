@@ -1,3 +1,7 @@
+//! 后端唯一的错误类型：库、IO、JSON 三类由 `?` 自动带上，第四类 `Msg` 是给用户的中文原话。
+//!
+//! 它 `impl Serialize`，所以命令层交给前端的永远是一个字符串（错误文案直接可读），
+//! `AppResult<T>` 就是 `Result<T, AppError>`。
 use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]

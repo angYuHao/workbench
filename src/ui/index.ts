@@ -1,5 +1,6 @@
 export { Button } from "./Button";
 export { Input, TextArea, InputNumber } from "./Input";
+export { SearchBox } from "./SearchBox";
 export { Select } from "./Select";
 export { Switch } from "./Switch";
 export { Checkbox } from "./Checkbox";

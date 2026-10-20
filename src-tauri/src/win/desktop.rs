@@ -1,3 +1,5 @@
+//! 桌面根目录：一台机器上可能同时有本机桌面和 OneDrive 托管的那个，
+//! 扫描和整理都要一起看，不然「桌面上一堆东西、页面里空的」就出现在用了云桌面的人身上。
 use windows::core::GUID;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{

@@ -1,3 +1,5 @@
+//! 解析 .lnk：取它真正指向的目标。走 IShellLinkW，所以要调用方先把 COM 初始化好，
+//! 没初始化时整片失败，而失败看着像「快捷方式指向自己」——不会报错，只会给出错的答案。
 use windows::core::{Interface, PCWSTR};
 use windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile, STGM_READ};

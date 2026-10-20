@@ -1,3 +1,4 @@
+//! 抓屏：GDI 把屏幕区域复制成位图再交给图标那套转 PNG，供截图识别二维码那一类工具用。
 use std::io::Cursor;
 
 use image::imageops::FilterType;

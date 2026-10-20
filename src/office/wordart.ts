@@ -10,7 +10,7 @@ import JSZip from "jszip";
 const NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const EMU_PER_PX = 9525;
 const PX_PER_PT = 4 / 3;
-export const SVG_NS = "http://www.w3.org/2000/svg";
+const SVG_NS = "http://www.w3.org/2000/svg";
 
 const kids = (el: Element | null | undefined, local: string): Element[] =>
   el ? [...el.children].filter((c) => c.localName === local) : [];
@@ -194,7 +194,7 @@ const tintUp = (color: string, ratio: number): string => {
 
 /* ------------------------------ 形状数据 ------------------------------ */
 
-export interface ArtRun {
+interface ArtRun {
   text: string;
   font: string;
   sizePx: number;
@@ -691,7 +691,7 @@ function wrapPlan(art: ArtShape, svg: SVGSVGElement): VLine[] | null {
   return plan.length > art.lines.length ? plan : null;
 }
 
-export function renderArt(art: ArtShape, input?: VLine[]): SVGSVGElement {
+function renderArt(art: ArtShape, input?: VLine[]): SVGSVGElement {
   const plan = input ?? planOf(art);
   const id = `qpa${++uid}`;
   const svg = svgEl("svg", { width: art.wPx, height: art.hPx, viewBox: `0 0 ${art.wPx} ${art.hPx}` }) as SVGSVGElement;

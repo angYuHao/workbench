@@ -2,6 +2,7 @@ import { Download, Upload } from "lucide-react";
 import { Button, message } from "../../ui";
 import { exportDb, restoreDb } from "../../api/settings";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { SettingsLine } from "./shared";
 
 /** 导出/恢复都是「先弹系统对话框再落库」，不碰设置窗口里的任何状态 */
 export default function DataSection() {
@@ -31,30 +32,24 @@ export default function DataSection() {
 
   return (
     <div className="settings-card">
-      <div className="settings-line">
-        <span className="settings-line-icon">
-          <Download size={16} strokeWidth={1.6} />
-        </span>
-        <div className="settings-line-text">
-          <div className="settings-line-title">导出备份</div>
-          <div className="settings-line-desc">把整个数据库另存为一个 .db 文件，含账户、书签与整理记录</div>
-        </div>
+      <SettingsLine
+        icon={Download}
+        title="导出备份"
+        desc="把整个数据库另存为一个 .db 文件，含账户、书签与整理记录"
+      >
         <Button icon={<Download size={15} />} onClick={handleExport}>
           导出
         </Button>
-      </div>
-      <div className="settings-line">
-        <span className="settings-line-icon">
-          <Upload size={16} strokeWidth={1.6} />
-        </span>
-        <div className="settings-line-text">
-          <div className="settings-line-title">恢复备份</div>
-          <div className="settings-line-desc">用选中的 .db 覆盖当前数据，完成后界面自动刷新</div>
-        </div>
+      </SettingsLine>
+      <SettingsLine
+        icon={Upload}
+        title="恢复备份"
+        desc="用选中的 .db 覆盖当前数据，完成后界面自动刷新"
+      >
         <Button icon={<Upload size={15} />} onClick={handleRestore}>
           恢复
         </Button>
-      </div>
+      </SettingsLine>
     </div>
   );
 }

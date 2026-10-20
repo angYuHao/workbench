@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Copy, Download, Eye, EyeOff, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, Copy, Download, Eye, EyeOff, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { totpSecret } from "../../api/totp";
 import { useTotpStore } from "../../stores/totp";
-import { Button, Empty, Input, ModalConfirm, Space, Spin, message, pressable } from "../../ui";
+import { Button, Empty, ModalConfirm, SearchBox, Space, Spin, message, pressable } from "../../ui";
 import { copyText } from "../../utils/clipboard";
 import { errText } from "../../utils/error";
 import AddDialog, { emptyInput } from "./AddDialog";
@@ -95,14 +95,7 @@ export default function TotpTool({ onBack }: { onBack: () => void }) {
         </Button>
         <h2 className="toolbar-title">2FA 认证管理</h2>
         <Space>
-          <Input
-            allowClear
-            prefix={<Search size={14} />}
-            placeholder="搜索服务方 / 账号"
-            style={{ width: 220 }}
-            value={keyword}
-            onChange={setKeyword}
-          />
+          <SearchBox placeholder="搜索服务方 / 账号" value={keyword} onChange={setKeyword} />
           <Button type="primary" icon={<Plus size={16} />} onClick={() => setEdit({ ...emptyInput })}>
             添加账户
           </Button>

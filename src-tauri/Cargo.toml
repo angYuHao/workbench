@@ -23,7 +23,7 @@ dirs = "5"
 notify = "7"
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
-image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 sha2 = "0.10"
 # 只要传输 + agent + 派生宏。TLS 用 native-tls（走 Windows 证书库），
 # 默认的 rustls 只认自带根证书，内网做中间人时会握手失败
@@ -41,13 +41,10 @@ windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_System_Com",
-    "Win32_System_Com_StructuredStorage",
-    "Win32_System_Ole",
     "Win32_System_Registry",
     # 单实例那把命名互斥体
     "Win32_System_Threading",
     "Win32_UI_Shell",
-    "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Storage_FileSystem",
     "Win32_Graphics_Gdi",

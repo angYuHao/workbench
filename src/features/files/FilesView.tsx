@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, FileText, Folder, FolderOpen, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowUp, FileText, Folder, FolderOpen, Pencil, Plus, Trash2 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { useFilesStore } from "../../stores/files";
 import PreviewPanel from "./PreviewPanel";
+import useSplitter from "./useSplitter";
 import { openPath } from "../../api/shell";
-import { Button, Form, FormItem, Input, Modal, Table, TextArea, message, pressable, useForm } from "../../ui";
+import { Button, Form, FormItem, Input, Modal, SearchBox, Table, TextArea, message, pressable, useForm } from "../../ui";
 import type { FileNode } from "../../types";
 
 /** 文件栏的地板：缩到这里就顶住，分栏再也拖不动（溢出交给 flex，不出横向滚动条） */
@@ -40,40 +41,8 @@ export default function FilesView() {
   } = useFilesStore();
   const [keyword, setKeyword] = useState("");
   const [edit, setEdit] = useState<FileNode | null>(null);
-  /** null = 还没拖动过分栏，文件栏与预览栏按 1:1 等分 */
-  const [previewWidth, setPreviewWidth] = useState<number | null>(null);
   const [form] = useForm();
-  const previewRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  const startResize = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      /** 量当前实际渲染宽度而不是记下的数值：记下的可能比窗口允许的更宽（flex 会把它夹住），
-          以渲染值起算才不会拖出「跟手但不长」的空转段 */
-      const startWidth = Math.round(previewRef.current?.getBoundingClientRect().width ?? 0);
-      dragRef.current = { startX: e.clientX, startWidth };
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-
-      const onMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return;
-        const next = dragRef.current.startWidth + dragRef.current.startX - ev.clientX;
-        /** 不设上下限，只挡负宽；能拖多宽由 flex 自己按剩余空间夹，所以永远不会撑出横向滚动条 */
-        setPreviewWidth(Math.max(0, next));
-      };
-      const onUp = () => {
-        dragRef.current = null;
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    },
-    [],
-  );
+  const { previewWidth, previewRef, startResize } = useSplitter();
 
   useEffect(() => {
     loadRoots().then((r) => {
@@ -209,14 +178,7 @@ export default function FilesView() {
             <span className="ellipsis label" style={{ flex: 1, minWidth: 0 }}>
               {currentRoot ?? ""}
             </span>
-            <Input
-              allowClear
-              prefix={<Search size={14} />}
-              placeholder="搜索名称 / 别名 / 说明"
-              style={{ width: 220, minWidth: 0 }}
-              value={keyword}
-              onChange={setKeyword}
-            />
+            <SearchBox placeholder="搜索名称 / 别名 / 说明" style={{ width: 220, minWidth: 0 }} value={keyword} onChange={setKeyword} />
           </div>
           <div className="pane-body" style={{ padding: 8 }}>
             <Table

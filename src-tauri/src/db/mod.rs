@@ -2,7 +2,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::{params, Connection};
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::filewatcher::FileWatcher;
 
 pub struct AppState {
@@ -33,8 +33,7 @@ pub fn commit(conn: &Connection) -> AppResult<()> {
 }
 
 pub fn init() -> AppResult<AppState> {
-    let data_dir = dirs::data_dir().ok_or_else(|| AppError::msg("无法获取 APPDATA 目录"))?;
-    let dir = data_dir.join("workbench");
+    let dir = crate::paths::app_dir()?;
     std::fs::create_dir_all(&dir)?;
     let db_path = dir.join("workbench.db");
 

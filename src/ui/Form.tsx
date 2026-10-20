@@ -67,7 +67,6 @@ export function useForm(): [FormInstance] {
 
 interface FormProps {
   form: FormInstance;
-  layout?: "vertical" | "horizontal";
   children: React.ReactNode;
 }
 

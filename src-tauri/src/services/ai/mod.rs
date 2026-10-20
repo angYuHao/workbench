@@ -16,3 +16,28 @@ pub(crate) mod memory;
 pub(crate) mod models;
 pub(crate) mod pageinfo;
 pub(crate) mod search;
+
+use std::time::Duration;
+
+/// 出网的请求都用同一个 UA：Bing 对没有 UA 的请求只发精简版结果页，抓不到结果块。
+/// 两处调用（搜索、抓网页）以前各写一份，改一处忘另一处就悄悄失败在对方站点上。
+pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+/// 起一个带超时的客户端。「起不动」怎么处理两处不一样（搜索直接报错、抓网页退回默认客户端），
+/// 所以这里只交回 `Result`，不替调用方决定
+pub(crate) fn http_client(timeout: Duration) -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .user_agent(USER_AGENT)
+        .build()
+}
+
+/// 按**字符**数收进上限，超了补一个省略号。
+/// 中文一个字三个字节，按字节切会落在字中间；日志、错误文案、给模型的摘要都从这儿走。
+pub(crate) fn shorten(s: &str, max: usize) -> String {
+    let mut out: String = s.chars().take(max).collect();
+    if s.chars().count() > max {
+        out.push('…');
+    }
+    out
+}

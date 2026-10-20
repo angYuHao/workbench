@@ -26,7 +26,7 @@ function looksBinary(bytes: Uint8Array): boolean {
   return controls * 40 > n;
 }
 
-export interface DecodedText {
+interface DecodedText {
   text: string;
   /** 解码用的编码名，非 UTF-8 时提示一下，免得以为字面就是乱码 */
   encoding: string;

@@ -3,6 +3,7 @@ mod db;
 mod error;
 mod filewatcher;
 mod models;
+mod paths;
 mod services;
 mod tray;
 mod win;

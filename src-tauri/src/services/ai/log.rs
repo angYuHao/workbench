@@ -9,6 +9,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
+use crate::services::ai::shorten;
+
 use crate::error::{AppError, AppResult};
 use crate::models::LogView;
 
@@ -42,9 +44,9 @@ pub fn path() -> PathBuf {
     }
     #[cfg(not(test))]
     {
-        dirs::data_dir()
-            .map(|d| d.join("workbench").join("ai.log"))
-            .unwrap_or_else(|| PathBuf::from("ai.log"))
+        crate::paths::app_dir()
+            .map(|d| d.join("ai.log"))
+            .unwrap_or_else(|_| PathBuf::from("ai.log"))
     }
 }
 
@@ -85,18 +87,9 @@ fn format_entry(c: &Call) -> String {
         c.model,
         status,
         c.elapsed_ms,
-        flat(&clip(c.request, REQUEST_CHARS)),
-        flat(&clip(c.response, BODY_CHARS)),
+        flat(&shorten(c.request, REQUEST_CHARS)),
+        flat(&shorten(c.response, BODY_CHARS)),
     )
-}
-
-fn clip(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut cut: String = s.chars().take(max).collect();
-    cut.push('…');
-    cut
 }
 
 fn flat(s: &str) -> String {

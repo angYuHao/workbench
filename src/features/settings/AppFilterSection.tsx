@@ -8,6 +8,7 @@ import {
 } from "../../api/desktop";
 import { getSettings, setSetting } from "../../api/settings";
 import { Button, Input, Space, Switch, message } from "../../ui";
+import { SettingsLine } from "./shared";
 import type { SyncReport } from "../../types";
 
 /** 「过滤系统应用」开关存在 settings 那张 KV 里；没写过就当开着（后端同口径） */
@@ -91,33 +92,32 @@ export default function AppFilterSection() {
 
   return (
     <div className="settings-card">
-      <div className="settings-line">
-        <span className="settings-line-icon">
-          <Filter size={16} strokeWidth={1.6} />
-        </span>
-        <div className="settings-line-text">
-          <div className="settings-line-title">过滤系统应用、驱动和运行环境</div>
-          <div className="settings-line-desc">
+      <SettingsLine
+        icon={Filter}
+        title="过滤系统应用、驱动和运行环境"
+        desc={
+          <>
             注册表里那些「装过但不是给你用的东西」：明写自己是系统组件的、挂在别的程序底下的补丁、
             名字带 更新程序 / 运行库 / redistributable 的附属程序、厂商驱动包（名字里有 driver / 驱动 /
             chipset / ODBC 的），以及 .NET、DirectX、WebView2 这类给别人用的运行环境；装在 Windows
             目录里的（含微软商店的 WindowsApps）也算。自己装来用的开发工具不算：Python、Node.js、
             Audacity 这种都不会被挡。第三方软件也不因为图标住在 <b>C:\Windows\Installer</b> 就被当成系统应用。
-          </div>
-        </div>
+          </>
+        }
+      >
         <Switch checked={system} onChange={(on) => void handleToggleSystem(on)} />
-      </div>
+      </SettingsLine>
 
-      <div className="settings-line">
-        <span className="settings-line-text">
-          <div className="settings-line-title">手动过滤</div>
-          <div className="settings-line-desc">
+      <SettingsLine
+        title="手动过滤"
+        desc={
+          <>
             一条就是一小段文字，不分大小写：程序名里含它、或者安装路径里含它，同步时就不收。
             比如写 <b>help</b> 挡帮助文档、写 <b>F:\Program\Games</b> 挡整个目录。
             名单只影响同步，已经收进来的卡片不会被删掉或藏起来。
-          </div>
-        </span>
-      </div>
+          </>
+        }
+      />
       <div style={{ display: "flex", gap: 8, margin: "0 0 10px" }}>
         <Input
           placeholder="程序名里的一段，或路径里的一段"
@@ -131,16 +131,15 @@ export default function AppFilterSection() {
       </div>
       {patterns.length === 0 && <div className="settings-empty">手动名单是空的，只按上面那个开关过滤</div>}
       {patterns.map((p) => (
-        <div className="settings-line" key={p}>
-          <span className="settings-line-text">
-            <div className="settings-line-title">{p}</div>
-          </span>
+        <SettingsLine key={p} title={p}>
           <Button type="link" size="small" danger onClick={() => void handleRemove(p)}>
             移除
           </Button>
-        </div>
+        </SettingsLine>
       ))}
 
+      {/* 这一行在文字栏里还挂着一段试算结果，套不进 SettingsLine（它只有 title/desc/动作三个位置），
+          所以留回原来的写法：图标 → 文字 → 动作，结果那段和提示并排同在文字栏里 */}
       <div className="settings-line">
         <span className="settings-line-icon">
           <FlaskConical size={16} strokeWidth={1.6} />
@@ -150,20 +149,7 @@ export default function AppFilterSection() {
           <div className="settings-line-desc">
             拿现在的名单重扫一遍（注册表卸载项 + 开始菜单快捷方式），只报数不写库：看看会收多少、又挡了谁。
           </div>
-          {report && (
-            <div className="settings-line-desc">
-              扫到 {report.scanned} 条 · 会收 {report.inserted} 个 · 被挡 {report.filtered} 个 ·
-              库里已有 {report.already} 个，同步后一共 {report.total} 个
-              {report.unresolved > 0 && <> · {report.unresolved} 条认不出要打开什么，不收</>}
-              {report.samples.length > 0 && (
-                <>
-                  <br />
-                  挡掉的：{report.samples.join("、")}
-                  {report.filtered > report.samples.length ? ` 等 ${report.filtered} 个` : ""}
-                </>
-              )}
-            </div>
-          )}
+          {report && <PreviewReport report={report} />}
         </div>
         <Space>
           {report && (
@@ -176,6 +162,24 @@ export default function AppFilterSection() {
           </Button>
         </Space>
       </div>
+    </div>
+  );
+}
+
+/** 试算结果：只报这次名单扫到什么、挡了谁，不写库 */
+function PreviewReport({ report }: { report: SyncReport }) {
+  return (
+    <div className="settings-line-desc">
+      扫到 {report.scanned} 条 · 会收 {report.inserted} 个 · 被挡 {report.filtered} 个 ·
+      库里已有 {report.already} 个，同步后一共 {report.total} 个
+      {report.unresolved > 0 && <> · {report.unresolved} 条认不出要打开什么，不收</>}
+      {report.samples.length > 0 && (
+        <>
+          <br />
+          挡掉的：{report.samples.join("、")}
+          {report.filtered > report.samples.length ? ` 等 ${report.filtered} 个` : ""}
+        </>
+      )}
     </div>
   );
 }

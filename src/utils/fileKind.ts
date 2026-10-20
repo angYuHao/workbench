@@ -13,7 +13,7 @@ const LEGACY_OFFICE_EXTENSIONS = new Set(["ppt", "pptx", "pub"]);
 
 const LAUNCHER_EXTENSIONS = [".lnk", ".exe", ".url", ".bat", ".cmd", ".msi", ".app", ".scr"];
 
-export type PreviewKind = "markdown" | "text" | "image" | "pdf" | "html" | "sheet" | "doc" | "legacy" | "other";
+type PreviewKind = "markdown" | "text" | "image" | "pdf" | "html" | "sheet" | "doc" | "legacy" | "other";
 
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");

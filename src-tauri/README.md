@@ -1,6 +1,8 @@
 # 后端（src-tauri）
 
-`commands/` 是薄层：取连接锁 → 调 `services/` → 把 `AppError` 转成字符串。文件名按域走（`ai.rs`、`categorize.rs`、`bookmarks.rs`…）。业务逻辑在 `services/`：一个文件能一眼看完的就把自己尾部的 `#[cfg(test)]` 带着；`ai/` 里已经分成子目录的那两个（`categorize/`、`models/`）大测试集单独放 `tests.rs`，靠 `mod.rs` 的 `pub(crate) use` 摊平，所以外面写 `crate::services::ai::models::probe(...)` 不用关心它落在哪个子文件（`categorize/` 新加的 `run.rs`、`apply.rs` 就照前一种，测试留自己尾巴上）。
+`commands/` 是薄层：取连接锁 → 调 `services/` → 把 `AppError` 转成字符串。文件名按域走（`ai.rs`、`categorize.rs`、`bookmarks.rs`…）。业务逻辑在 `services/`：一个文件能一眼看完的就把自己尾部的 `#[cfg(test)]` 带着；分成子目录的那四个（`ai/categorize/`、`ai/models/`、`installed/`、`desktop/`）大测试集单独放 `tests.rs`，靠 `mod.rs` 的 `pub use` / `pub(crate) use` 摊平，所以外面写 `crate::services::desktop::scan_desktop(...)` 不用关心它落在哪个子文件（`categorize/` 新加的 `run.rs`、`apply.rs` 就照前一种，测试留自己尾巴上）。
+
+拆目录时 `include_str!` 的相对深度会变（`../db/schema.sql` → `../../db/schema.sql`），编译期就报，不会静默。
 
 **测试建库一律 `include_str!("…/db/schema.sql")`，别手抄建表语句**：抄来的那份会跟生产库悄悄走偏——原先 `apply` 那份手抄 fixture 里 `apps` 没有 `target NOT NULL`，同一份数据在真库里插不进去，测过了也不作数。
 
@@ -41,7 +43,7 @@ grep -c 'commands::' src/lib.rs
 
 ## 「应用」页的数据源：注册表四视图 + 开始菜单补一遍
 
-`services/installed.rs` 读 `HKLM`/`HKCU` 的 `...\CurrentVersion\Uninstall` **四个视图**（32 位程序在 `WOW6432Node` 那份里，只读一份会漏一半），只读层在 `win/registry.rs`（`KEY_READ=131097`、`KEY_WOW64_32KEY=512`、`KEY_WOW64_64KEY=256`、`ERROR_NO_MORE_ITEMS=259` 这些常量是从本地 `windows-0.58.0` 源码里查的，改之前先 grep，别照记忆写）。
+`services/installed/`（拆成 `scan` 读源头 / `target` 认目标 / `filter` 判收不收 / `store` 写库，共用类型在 `mod.rs`）读 `HKLM`/`HKCU` 的 `...\CurrentVersion\Uninstall` **四个视图**（32 位程序在 `WOW6432Node` 那份里，只读一份会漏一半），只读层在 `win/registry.rs`（`KEY_READ=131097`、`KEY_WOW64_32KEY=512`、`KEY_WOW64_64KEY=256`、`ERROR_NO_MORE_ITEMS=259` 这些常量是从本地 `windows-0.58.0` 源码里查的，改之前先 grep，别照记忆写）。
 
 第二遍采集的是 `shortcut_index()` 里**没被第一遍认领**的 .lnk：商店应用和绿色版不写卸载项，光读注册表就缺这一类。两道闸门防止重复和不该长的卡片——`claimed`（某个注册表条目已经拿这个 .lnk 当过目标）和 `program_target()`（解出来的目标得是 exe / 脚本 / .lnk 这种能跑的东西，.chm 帮助、.htm 说明不算应用）；系统过滤和手动名单在第二遍一样走一遍，所以 `C:\WINDOWS\system32` 那堆自带工具不会跟着进来。
 

@@ -73,8 +73,7 @@ export function Tag({ color = "default", children, style }: TagProps) {
 
 interface SpaceProps {
   size?: number | "small" | "middle" | "large";
-  direction?: "horizontal" | "vertical";
-  align?: "start" | "center" | "end";
+  align?: "start" | "center";
   style?: React.CSSProperties;
   onClick?: (e: React.MouseEvent) => void;
   onDoubleClick?: (e: React.MouseEvent) => void;
@@ -85,7 +84,6 @@ const spaceSizes = { small: 4, middle: 8, large: 16 };
 
 export function Space({
   size = 8,
-  direction = "horizontal",
   align = "center",
   style,
   onClick,
@@ -99,9 +97,9 @@ export function Space({
       onDoubleClick={onDoubleClick}
       style={{
         display: "flex",
-        flexDirection: direction === "vertical" ? "column" : "row",
+        flexDirection: "row",
         gap,
-        alignItems: align === "start" ? "flex-start" : align === "end" ? "flex-end" : "center",
+        alignItems: align === "start" ? "flex-start" : "center",
         ...style,
       }}
     >

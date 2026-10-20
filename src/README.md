@@ -7,12 +7,12 @@ features/apps/        AppsView（「应用」页：注册表里的已安装程�
 features/bookmarks/   BookmarksView + BookmarkAnalysisModal + useBookmarkAnalysis
 features/files/       FilesView + PreviewPanel / OfficePreview / TextPreview / PreviewError
 features/settings/    SettingsModal + 各个 Section + 编辑弹窗
-shared/               两个以上功能共用的界面件与 hook（CategoryTree、useCategoryScaffold、SelectionBar、SmartCategorizeModal、useIdSelection…）
+shared/               两个以上功能共用的界面件与 hook（CategoryTree、useCategoryScaffold、SelectionBar、SmartCategorizeModal、useIdSelection、useSmartScope、dragItem…）
 tools/                工具箱，一个工具一个目录 → 见 tools/README.md
 office/               读磁盘格式的解析层（docx/xlsx/xls/doc/艺术字）→ 见 office/README.md
 api/                  唯一允许调 invoke 的地方，一个后端域一个文件
 stores/               zustand，每个功能一个 store
-ui/                   自研组件库：Button Table Modal Select Input Form Tooltip…
+ui/                   自研组件库：Button Table Modal Select Input SearchBox Form Tooltip…
 types/                按功能域分文件，index.ts 只做汇总
 styles/               global.css 只做 @import；剩下的按界面切成 8 个文件
 utils/                真·通用：clipboard、error、fileKind、textFile

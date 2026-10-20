@@ -1,3 +1,5 @@
+//! 当前 Windows 用户的 DPAPI 加解密：模型密钥和 2FA 密钥的密文都靠它。
+//! 换机器、换用户都解不开，所以这些密文只在原机上有效（能跨机迁移的只有口令备份那份）。
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{HLOCAL, LocalFree};
 use windows::Win32::Security::Cryptography::{

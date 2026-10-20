@@ -194,8 +194,10 @@ export default function PreviewPanel({ node, record, preview }: Props) {
               className="icon-button"
               size={16}
               aria-label="在资源管理器里显示"
-              {...pressable(() => revealInExplorer(node.path))}
-              onClick={() => revealInExplorer(node.path)}
+              {...pressable(() =>
+                revealInExplorer(node.path).catch((e) => message.error(String(e)))
+              )}
+              onClick={() => revealInExplorer(node.path).catch((e) => message.error(String(e)))}
             />
           </div>
         )}

@@ -3,7 +3,7 @@
 
 use crate::models::{SmartCategorizeItem, SmartCategorizeResult};
 
-use super::client::head;
+use crate::services::ai::shorten;
 use super::preset::stem;
 use super::{ask_model, blank, merge};
 use crate::services::ai::models::ChatTarget;
@@ -92,7 +92,7 @@ pub async fn fill_by_search(
     let rows = match ask_model(target, &system_prompt(), &prompt, &tag, items.len()).await {
         Ok(rows) => rows,
         Err(e) => {
-            let why = format!("带着资料问模型也失败：{}", head(&e.to_string(), 80));
+            let why = format!("带着资料问模型也失败：{}", shorten(&e.to_string(), 80));
             out.extend(items.iter().map(|i| blank(i, &why)));
             return out;
         }

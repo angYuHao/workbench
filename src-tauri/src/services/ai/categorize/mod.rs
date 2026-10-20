@@ -19,11 +19,12 @@
 //! 本文件只留一步的编排：`classify` 把上面几个串起来。
 
 use crate::error::AppResult;
+use crate::services::ai::shorten;
 use crate::models::{SmartCategorizeItem, SmartCategorizeResult};
 use crate::services::ai::models::ChatTarget;
 
 pub(crate) use apply::apply;
-pub(crate) use client::{chat, head};
+pub(crate) use client::chat;
 pub(crate) use lookup::fill_by_search;
 pub(crate) use parse::parse_json_array;
 pub(crate) use preset::{by_memory, stem};
@@ -68,7 +69,7 @@ pub(crate) async fn ask_model(
     // 分类请求的正文只有名字和网址（本地路径已经不进提示词），可以整条进日志
     let text = chat(target, system, prompt, tag, count, false).await?;
     parse_rows(&text).ok_or_else(|| {
-        crate::error::AppError::msg(format!("回复里读不出分类数组：{}", head(text.trim(), 80)))
+        crate::error::AppError::msg(format!("回复里读不出分类数组：{}", shorten(text.trim(), 80)))
     })
 }
 

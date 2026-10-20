@@ -1,5 +1,35 @@
 import type { ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import type { AiModel } from "../../types";
+
+/** 设置卡片里的一行：图标 + 标题/说明 + 右边那个动作。
+    「16 / 1.6」那个图标尺寸以前在每一行重写一遍，归到这里改一处就全体一致。 */
+export function SettingsLine({
+  icon: Icon,
+  title,
+  desc,
+  children,
+}: {
+  icon?: LucideIcon;
+  title: ReactNode;
+  desc?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="settings-line">
+      {Icon && (
+        <span className="settings-line-icon">
+          <Icon size={16} strokeWidth={1.6} />
+        </span>
+      )}
+      <div className="settings-line-text">
+        <div className="settings-line-title">{title}</div>
+        {desc && <div className="settings-line-desc">{desc}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
 
 /** 表单里就地显示的一句结果/错误，ok 决定它是绿是红 */
 export interface Hint {

@@ -1,5 +1,6 @@
 import { Bot, Brain, Globe, Plus, ScrollText } from "lucide-react";
 import { Button } from "../../ui";
+import { SettingsLine } from "./shared";
 import type { AiLogView, AiMemory, AiModel } from "../../types";
 
 interface Props {
@@ -53,16 +54,12 @@ export default function ModelsSection({
           <div className="settings-empty">还没有模型，点右上「添加模型」填接口地址、模型名和密钥</div>
         )}
         {models.map((m) => (
-          <div key={m.id} className="settings-line">
-            <span className="settings-line-icon">
-              <Bot size={16} strokeWidth={1.6} />
-            </span>
-            <div className="settings-line-text">
-              <div className="settings-line-title">{m.name}</div>
-              <div className="settings-line-desc">
-                {m.baseUrl} · {m.model} · {m.hasKey ? "密钥已保存" : "未填密钥"}
-              </div>
-            </div>
+          <SettingsLine
+            key={m.id}
+            icon={Bot}
+            title={m.name}
+            desc={<>{m.baseUrl} · {m.model} · {m.hasKey ? "密钥已保存" : "未填密钥"}</>}
+          >
             <span className="settings-row-actions">
               <Button type="link" size="small" loading={probingId === m.id} onClick={() => onProbe(m)}>
                 测试
@@ -74,23 +71,22 @@ export default function ModelsSection({
                 删除
               </Button>
             </span>
-          </div>
+          </SettingsLine>
         ))}
-        <div className="settings-line">
-          <span className="settings-line-icon">
-            <ScrollText size={16} strokeWidth={1.6} />
-          </span>
-          <div className="settings-line-text">
-            <div className="settings-line-title">调用日志</div>
-            <div className="settings-line-desc">
+        <SettingsLine
+          icon={ScrollText}
+          title="调用日志"
+          desc={
+            <>
               每次 AI 请求记三行：地址、模型、状态码、耗时，加请求和响应的开头。密钥不写进日志；文件只留最近 600
               行，攒够就自动剪，启动时和每次写之前各查一次
-            </div>
-          </div>
+            </>
+          }
+        >
           <Button icon={<ScrollText size={15} />} onClick={onShowLog}>
             {aiLog ? "刷新" : "最近 100 行"}
           </Button>
-        </div>
+        </SettingsLine>
         {aiLog && (
           <>
             <pre className="settings-log">
@@ -113,43 +109,35 @@ export default function ModelsSection({
             </div>
           </>
         )}
-        <div className="settings-line">
-          <span className="settings-line-icon">
-            <Brain size={16} strokeWidth={1.6} />
-          </span>
-          <div className="settings-line-text">
-            <div className="settings-line-title">本机记忆 · {memory.length} 个软件</div>
-            <div className="settings-line-desc">
-              {memory.length === 0
-                ? "判过的软件记在这儿，下次既不问模型也不再联网搜"
-                : `${memory
-                    .slice(0, 6)
-                    .map((m) => `${m.name}→${m.category}`)
-                    .join("、")}${memory.length > 6 ? ` 等 ${memory.length} 条` : ""}`}
-            </div>
-          </div>
+        <SettingsLine
+          icon={Brain}
+          title={<>本机记忆 · {memory.length} 个软件</>}
+          desc={
+            memory.length === 0
+              ? "判过的软件记在这儿，下次既不问模型也不再联网搜"
+              : `${memory
+                  .slice(0, 6)
+                  .map((m) => `${m.name}→${m.category}`)
+                  .join("、")}${memory.length > 6 ? ` 等 ${memory.length} 条` : ""}`
+          }
+        >
           {memory.length > 0 && (
             <Button type="link" size="small" danger onClick={onClearMemory}>
               清空
             </Button>
           )}
-        </div>
-        <div className="settings-line">
-          <span className="settings-line-icon">
-            <Globe size={16} strokeWidth={1.6} />
-          </span>
-          <div className="settings-line-text">
-            <div className="settings-line-title">网页缓存 · {pageCache} 条</div>
-            <div className="settings-line-desc">
-              网址智能分析抓回来的名称和简介按地址存本机，再点分析不再打网络；网页改版了就在这儿清掉重抓
-            </div>
-          </div>
+        </SettingsLine>
+        <SettingsLine
+          icon={Globe}
+          title={<>网页缓存 · {pageCache} 条</>}
+          desc="网址智能分析抓回来的名称和简介按地址存本机，再点分析不再打网络；网页改版了就在这儿清掉重抓"
+        >
           {pageCache > 0 && (
             <Button type="link" size="small" danger onClick={onClearPageCache}>
               清空
             </Button>
           )}
-        </div>
+        </SettingsLine>
       </div>
     </>
   );

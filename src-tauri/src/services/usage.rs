@@ -1,3 +1,6 @@
+//! 使用次数：`usage_stats(kind, id)` 一张表记下所有模块「这条被点开过几次」。
+//! 列表和分类树按它把常用的排前面；条目删掉时这一行也要跟着摘（`forget`），
+//! 否则新条目撞上旧 id 会继承别人的次数。
 use rusqlite::{params, Connection};
 
 use crate::error::AppResult;

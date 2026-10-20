@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 use crate::services::bookmarks::url_key;
-use crate::services::ai::search::{attr, between, clean, cut};
+use crate::services::ai::search::{attr, between, clean};
+use crate::services::ai::shorten;
 
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const TIMEOUT: Duration = Duration::from_secs(6);
 /// api.github.com 匿名限 60 次/小时：一轮最多用这么多，剩下的下轮接着跑
 pub const GITHUB_BUDGET: usize = 60;
@@ -35,11 +35,6 @@ pub fn looks_like_github(url: &str) -> bool {
     split_url(url)
         .map(|(host, _)| host.ends_with("github.com"))
         .unwrap_or(false)
-}
-
-/// 按字符数收进上限
-pub fn fit(s: &str, max: usize) -> String {
-    cut(s, max)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,8 +190,8 @@ async fn github(path: &str) -> Outcome {
         name.push_str(&segs[2..].join("/"));
     }
     Outcome::Found(PageInfo {
-        name: cut(&one_line(&name), NAME_CHARS),
-        summary: cut(&one_line(desc), SUMMARY_CHARS),
+        name: shorten(&one_line(&name), NAME_CHARS),
+        summary: shorten(&one_line(desc), SUMMARY_CHARS),
         source: "github".into(),
     })
 }
@@ -237,18 +232,14 @@ async fn page(url: &str, host: &str) -> Option<PageInfo> {
         .unwrap_or_default();
 
     Some(PageInfo {
-        name: cut(&title, NAME_CHARS),
-        summary: cut(&one_line(&summary), SUMMARY_CHARS),
+        name: shorten(&title, NAME_CHARS),
+        summary: shorten(&one_line(&summary), SUMMARY_CHARS),
         source: "page".into(),
     })
 }
 
 fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        .user_agent(UA)
-        .build()
-        .unwrap_or_default()
+    crate::services::ai::http_client(TIMEOUT).unwrap_or_default()
 }
 
 /// `<meta property="og:title" content="…">` 里的 content，属性顺序无所谓，单双引号都认

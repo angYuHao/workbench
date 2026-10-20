@@ -1,3 +1,5 @@
+//! 把一个文件/快捷方式的图标抽成 PNG 存进缓存目录：shell 负责按 IconLocation
+//! （含「dll 里第 N 个图标」那种写法）算出该抽谁，我们只管落盘。
 use std::ffi::c_void;
 
 use image::{ImageBuffer, Rgba, RgbaImage};

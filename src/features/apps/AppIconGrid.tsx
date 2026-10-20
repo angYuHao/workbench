@@ -1,7 +1,7 @@
 import { Empty, Tooltip, message, pressable } from "../../ui";
 import IconWithFallback from "../../shared/IconWithFallback";
 import SelectTick from "../../shared/SelectTick";
-import { ITEM_MIME } from "../../shared/CategoryTree";
+import { ITEM_MIME } from "../../shared/dragItem";
 import { launchApp } from "../../api/desktop";
 import { stripExt } from "../../utils/fileKind";
 import type { AppEntry } from "../../types";
@@ -16,6 +16,13 @@ interface Props {
 }
 
 export default function AppIconGrid({ apps, selectMode, selectedIds, onToggleSelect, onLaunched }: Props) {
+  /** 双击和 Enter 走同一条：启动，成了再刷一遍列表（计数变了，卡片顺序和分类热度也得跟着变） */
+  const launch = (id: number) => {
+    launchApp(id)
+      .then(() => onLaunched?.())
+      .catch((e) => message.error(String(e)));
+  };
+
   if (apps.length === 0) {
     return <Empty description="还没收录到程序：点「重新同步」再读一遍（注册表 + 开始菜单），或用「添加程序」手动填" />;
   }
@@ -52,9 +59,7 @@ export default function AppIconGrid({ apps, selectMode, selectedIds, onToggleSel
               onClick={() => selectMode && onToggleSelect?.(app.id)}
               onDoubleClick={() => {
                 if (selectMode) return;
-                launchApp(app.id)
-                  .then(() => onLaunched?.())
-                  .catch((e) => message.error(String(e)));
+                launch(app.id);
               }}
               /** 键盘没有「双击」这回事：Enter 就等于那一下双击 */
               {...pressable(() => {
@@ -62,9 +67,7 @@ export default function AppIconGrid({ apps, selectMode, selectedIds, onToggleSel
                   onToggleSelect?.(app.id);
                   return;
                 }
-                launchApp(app.id)
-                  .then(() => onLaunched?.())
-                  .catch((e) => message.error(String(e)));
+                launch(app.id);
               })}
               // 卡片不放操作按钮：删除走顶部「选择」模式；右键只屏蔽，不挂菜单
               onContextMenu={(e) => e.preventDefault()}

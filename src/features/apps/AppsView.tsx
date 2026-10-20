@@ -1,17 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
-import { Filter, Plus, RefreshCw, Search, Sparkles, Square } from "lucide-react";
+import { Plus, RefreshCw, Sparkles, Square } from "lucide-react";
 import { useDesktopStore } from "../../stores/desktop";
-import { addAppFilter, syncInstalledApps, saveApp } from "../../api/desktop";
+import { syncInstalledApps, saveApp } from "../../api/desktop";
 import { deleteCategories, deleteCategory } from "../../api/categories";
 import type { CategoryNode } from "../../shared/CategoryTree";
-import CategoryTree, { ITEM_MIME } from "../../shared/CategoryTree";
+import CategoryTree from "../../shared/CategoryTree";
 import { useCategoryScaffold } from "../../shared/useCategoryScaffold";
 import AppIconGrid from "./AppIconGrid";
+import FilterDropSlot from "./FilterDropSlot";
 import SelectionBar from "../../shared/SelectionBar";
 import SmartCategorizeModal from "../../shared/SmartCategorizeModal";
 import { useIdSelection } from "../../shared/useIdSelection";
 import { useSmartCategorize } from "../../shared/useSmartCategorize";
-import { Button, Checkbox, Form, FormItem, Input, Modal, ModalConfirm, Select, Space, message, useForm } from "../../ui";
+import { useSmartScope } from "../../shared/useSmartScope";
+import {
+  Button,
+  Checkbox,
+  Form,
+  FormItem,
+  Input,
+  message,
+  Modal,
+  ModalConfirm,
+  SearchBox,
+  Select,
+  Space,
+  useForm,
+} from "../../ui";
 import { stripExt } from "../../utils/fileKind";
 import type { AppEntry } from "../../types";
 
@@ -31,6 +46,15 @@ const emptyApp: AppEntry = {
 
 /** 智能分类只碰这些后缀，其余（文档、压缩包、文件夹）留在本机人工归 */
 const PROGRAM_EXTS = ["lnk", "exe", "app", "msi", "bat", "cmd", "com", "scr"];
+
+/** 只有程序进模型。老桌面登记那批里混着文档卡片（工资表这种），它们的名字一旦进提示词就出本机；
+ * 而「按功能分类」说的是应用，文档本来就不该由模型猜——要归类自己拖到分类上。 */
+const isProgram = (a: AppEntry) => {
+  const t = a.target.toLowerCase();
+  if (t.includes("://")) return true;
+  const dot = t.lastIndexOf(".");
+  return dot < 0 || PROGRAM_EXTS.includes(t.slice(dot + 1));
+};
 
 /**
  * 「应用」页：注册表里的已安装程序 + 开始菜单里没人认领的快捷方式收成卡片，双击打开。
@@ -114,37 +138,14 @@ export default function AppsView() {
       );
   }, [apps, activeCategory, keyword]);
 
-  /** 智能分类的「只处理新增」：未分类和堆在「其他」里的才判，已经进了真分类的跳过 */
-  const [smartOnlyNew, setSmartOnlyNew] = useState(true);
-  const otherCategoryId = useMemo(() => categories.find((c) => c.name === "其他")?.id ?? null, [categories]);
-  /**
-   * 只有程序进模型。老桌面登记那批里混着文档卡片（工资表这种），它们的名字一旦进提示词就出本机；
-   * 而「按功能分类」说的是应用，文档本来就不该由模型猜——要归类自己拖到分类上。
-   */
-  const isProgram = (a: AppEntry) => {
-    const t = a.target.toLowerCase();
-    if (t.includes("://")) return true;
-    const dot = t.lastIndexOf(".");
-    return dot < 0 || PROGRAM_EXTS.includes(t.slice(dot + 1));
-  };
-  const smartTargets = (onlyNew: boolean) =>
-    visibleApps
-      .filter((a) => isProgram(a))
-      .filter((a) => !onlyNew || a.categoryId === null || a.categoryId === otherCategoryId)
-      .map((a) => ({ id: a.id, name: a.name, target: a.target, url: null }));
-
-  /** 打开（或换口径重开）智能分类窗口。一个都不剩时退回全量：勾画在窗口里，窗口不开他就没地方取消 */
-  const restartSmart = (onlyNew: boolean) => {
-    const list = smartTargets(onlyNew);
-    if (list.length) {
-      setSmartOnlyNew(onlyNew);
-      smart.start(list);
-      return;
-    }
-    setSmartOnlyNew(false);
-    message.info("按「只处理新增」没有要判的程序了：已去掉勾，连已经归好类的一起判");
-    smart.start(smartTargets(false));
-  };
+  const { onlyNew, restart } = useSmartScope({
+    items: visibleApps,
+    categories,
+    unit: "程序",
+    start: smart.start,
+    eligible: isProgram,
+    toSmart: (a) => ({ id: a.id, name: a.name, target: a.target, url: null }),
+  });
 
   const deleteCat = (node: CategoryNode) =>
     ModalConfirm({
@@ -186,37 +187,6 @@ export default function AppsView() {
     }
   };
 
-  const [filterOver, setFilterOver] = useState(false);
-
-  /** 拖过来的只认自家卡片；从资源管理器拖文件进来仍由 App.tsx 那层吞掉 */
-  const carriesItem = (e: React.DragEvent) => e.dataTransfer.types.includes(ITEM_MIME);
-
-  /**
-   * 拖一张卡片到「拖来过滤」上：把这个名字加进过滤名单，同时删掉卡片。
-   * 模式取去扩展名的显示名（`Loomy.lnk` → `Loomy`），装到新版本也还认得；
-   * 名单本身在 设置 → 应用过滤 里能改能删，也能试算它到底挡了谁。
-   */
-  const dropToFilter = async (id: number) => {
-    const app = apps.find((a) => a.id === id);
-    if (!app) return;
-    const pattern = stripExt(app.name).trim();
-    if (!pattern) {
-      message.error("这张卡片的名字是空的，过滤了也挡不住东西");
-      return;
-    }
-    try {
-      const added = await addAppFilter(pattern);
-      await removeApp(app.id);
-      message.success(
-        added
-          ? `已过滤「${pattern}」：卡片移除了，以后同步不再收它（想改想去 设置 → 应用过滤）`
-          : `「${pattern}」本来就在过滤名单里，卡片移除了`
-      );
-    } catch (e) {
-      message.error(String(e));
-    }
-  };
-
   const handleDelete = (ids: number[]) => {
     if (ids.length === 0) return;
     ModalConfirm({
@@ -234,14 +204,7 @@ export default function AppsView() {
     <div className="page">
       <div className="toolbar">
         <h2 className="toolbar-title">应用</h2>
-        <Input
-          allowClear
-          prefix={<Search size={14} />}
-          placeholder="搜索程序名 / 路径"
-          style={{ width: 220 }}
-          value={keyword}
-          onChange={setKeyword}
-        />
+        <SearchBox placeholder="搜索程序名 / 路径" value={keyword} onChange={setKeyword} />
         <div className="toolbar-spacer" />
         {selection.active ? (
           <SelectionBar
@@ -260,7 +223,7 @@ export default function AppsView() {
             <Button
               type="primary"
               icon={<Sparkles size={16} />}
-              onClick={() => restartSmart(smartOnlyNew)}
+              onClick={() => restart(onlyNew)}
               disabled={visibleApps.length === 0}
             >
               智能分类
@@ -287,31 +250,7 @@ export default function AppsView() {
           />
           {/* 落点钉在这一栏最底下：分类多到要滚动时也留在视线里，图标大到能手能落在上面。
               提示用原生 title 不用 Tooltip —— 浮层绝对定位会撑大这一栏的横向滚动区，一悬停就出滚动条 */}
-          <div className="apps-filter-slot">
-            <div
-              className={filterOver ? "filter-drop on" : "filter-drop"}
-              aria-label="拖到此处过滤"
-              title="把卡片拖到这里：加入过滤名单，同时移除这张卡片（名单在 设置 → 应用过滤 里能改能删）"
-              onDragOver={(e) => {
-                if (!carriesItem(e)) return;
-                e.preventDefault();
-                // 卡片那边 effectAllowed 写的是 move，这里必须也用 move：
-                // 两个不一致时 Chrome 直接把这次拖动判成 none，drop 根本不会发出来
-                e.dataTransfer.dropEffect = "move";
-                if (!filterOver) setFilterOver(true);
-              }}
-              onDragLeave={() => setFilterOver(false)}
-              onDrop={(e) => {
-                if (!carriesItem(e)) return;
-                e.preventDefault();
-                setFilterOver(false);
-                const id = Number(e.dataTransfer.getData(ITEM_MIME));
-                if (Number.isInteger(id) && id > 0) void dropToFilter(id);
-              }}
-            >
-              <Filter size={22} strokeWidth={1.6} />
-            </div>
-          </div>
+          <FilterDropSlot apps={apps} />
         </div>
         <div className="content-pane">
           <AppIconGrid
@@ -358,8 +297,8 @@ export default function AppsView() {
         extra={
           <>
             <Checkbox
-              checked={smartOnlyNew}
-              onChange={(v) => restartSmart(v)}
+              checked={onlyNew}
+              onChange={(v) => restart(v)}
               label="只判「未分类」和落在「其他」里的，已经进了真分类的跳过"
             />
             <span className="label">

@@ -5,6 +5,7 @@
 
 use crate::error::AppResult;
 use crate::services::ai::models::{note, ChatTarget};
+use crate::services::ai::shorten;
 
 
 /// 整份一次请求，不分批。
@@ -67,7 +68,7 @@ pub(crate) async fn chat(
                 response.usage.output_tokens.unwrap_or(0),
                 response.usage.reasoning_tokens.unwrap_or(0)
             );
-            note(target, tag, &logged, started, true, &format!("{used} → {}", head(text.trim(), 300)));
+            note(target, tag, &logged, started, true, &format!("{used} → {}", shorten(text.trim(), 300)));
             Ok(text)
         }
         Err(e) => {
@@ -76,13 +77,4 @@ pub(crate) async fn chat(
             Err(crate::error::AppError::msg(why))
         }
     }
-}
-
-pub(crate) fn head(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut cut: String = s.chars().take(max).collect();
-    cut.push('…');
-    cut
 }

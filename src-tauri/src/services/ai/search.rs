@@ -11,10 +11,9 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
+use crate::services::ai::shorten;
 
 const ENDPOINT: &str = "https://cn.bing.com/search";
-/// Bing 对没有 UA 的请求会发一个精简版页面，拿不到结果块
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const ITEM: &str = "<li class=\"b_algo\"";
 const MAX_SNIPPETS: usize = 4;
 const TITLE_CHARS: usize = 60;
@@ -45,10 +44,7 @@ impl Snippet {
 pub async fn search(query: &str) -> AppResult<Vec<Snippet>> {
     let url = format!("{ENDPOINT}?q={}", encode(query));
     let started = std::time::Instant::now();
-    let page = reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .user_agent(UA)
-        .build()
+    let page = crate::services::ai::http_client(Duration::from_secs(8))
         .map_err(|e| AppError::msg(format!("起不动 HTTP 客户端：{e}")))?
         .get(&url)
         .header("accept-language", "zh-CN,zh;q=0.9")
@@ -119,13 +115,13 @@ fn parse_results(html: &str) -> Vec<Snippet> {
 
 fn parse_item(block: &str) -> Option<Snippet> {
     let heading = between(block, "<h2", "</h2>")?;
-    let title = cut(&clean(&heading), TITLE_CHARS);
+    let title = shorten(&clean(&heading), TITLE_CHARS);
     if title.is_empty() {
         return None;
     }
     let site = attr(&heading, "href").map(|h| host(&h)).unwrap_or_default();
     let text = between(block, "class=\"b_caption\"", "</p>")
-        .map(|p| cut(&clean(&p), SNIPPET_CHARS))
+        .map(|p| shorten(&clean(&p), SNIPPET_CHARS))
         .unwrap_or_default();
     Some(Snippet { title, site, text })
 }
@@ -212,14 +208,6 @@ fn host(url: &str) -> String {
     after.split('/').next().unwrap_or("").trim_start_matches("www.").to_string()
 }
 
-pub(crate) fn cut(s: &str, max: usize) -> String {
-    let mut out: String = s.chars().take(max).collect();
-    if s.chars().count() > max {
-        out.push('…');
-    }
-    out
-}
-
 /// 只用于查询词：不依赖 url 编码 crate，非保留字符一律 %XX，空格按表单习惯给 +
 fn encode(q: &str) -> String {
     let mut out = String::with_capacity(q.len() * 3);
@@ -277,8 +265,8 @@ mod tests {
 
     #[test]
     fn long_pieces_get_cut_not_wrapped() {
-        assert_eq!(cut("一二三四五六七八九十", 4), "一二三四…");
-        assert_eq!(cut("短", 4), "短");
+        assert_eq!(shorten("一二三四五六七八九十", 4), "一二三四…");
+        assert_eq!(shorten("短", 4), "短");
     }
 
     /// 真联网一条：默认不跑，验证 Bing 结构和解析还合不合得上时手动执行

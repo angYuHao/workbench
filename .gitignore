@@ -6,6 +6,9 @@ src-tauri/target/
 # tauri-build 每次编译重写的权限清单，进来只是噪音
 src-tauri/gen/schemas/
 
+# agent 在本机留下的运行时配置，不属于源码
+.agent-kernel/
+
 # 本机跑出来的日志
 *.log
 

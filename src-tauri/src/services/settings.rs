@@ -1,3 +1,8 @@
+//! `settings` 那张 KV：开关（如「过滤系统应用」）、路径清单，以及别的模块借来存的本机状态
+//! （远端模型列表缓存、网页信息缓存都塞在这儿）。
+//!
+//! 这张表是「加一个键」的出口：本项目没有建表迁移机制，给已有的表加列在老库里加不出来，
+//! 所以新状态一律优先落到这里或者新开一张表。
 use std::collections::HashMap;
 
 use rusqlite::{params, Connection, OptionalExtension};

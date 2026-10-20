@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 use crate::models::Bookmark;
 use crate::services::ai::models::ChatTarget;
+use crate::services::ai::shorten;
 use crate::services::{ai::{categorize, pageinfo}, bookmarks};
 use crate::services::bookmarks::url_key;
 use pageinfo::PageInfo;
@@ -162,7 +163,7 @@ pub async fn ask(
     // 这条 prompt 每条都带网址，正文不写进调用日志
     let text = categorize::chat(target, SYSTEM, &prompt, &tag, need.len(), true).await?;
     let rows_json = categorize::parse_json_array(&text)
-        .ok_or_else(|| AppError::msg(format!("书签分析的回复读不出数组：{}", categorize::head(&text, 80))))?;
+        .ok_or_else(|| AppError::msg(format!("书签分析的回复读不出数组：{}", shorten(&text, 80))))?;
 
     let mut out = Vec::new();
     for value in rows_json {
@@ -175,8 +176,8 @@ pub async fn ask(
         out.push((
             id,
             PageInfo {
-                name: pageinfo::fit(&name, pageinfo::NAME_CHARS),
-                summary: pageinfo::fit(&summary, pageinfo::SUMMARY_CHARS),
+                name: shorten(&name, pageinfo::NAME_CHARS),
+                summary: shorten(&summary, pageinfo::SUMMARY_CHARS),
                 source: "model".into(),
             },
         ));
