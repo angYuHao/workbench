@@ -43,7 +43,7 @@ grep -c 'commands::' src/lib.rs
 
 `services/installed.rs` 读 `HKLM`/`HKCU` 的 `...\CurrentVersion\Uninstall` **四个视图**（32 位程序在 `WOW6432Node` 那份里，只读一份会漏一半），只读层在 `win/registry.rs`（`KEY_READ=131097`、`KEY_WOW64_32KEY=512`、`KEY_WOW64_64KEY=256`、`ERROR_NO_MORE_ITEMS=259` 这些常量是从本地 `windows-0.58.0` 源码里查的，改之前先 grep，别照记忆写）。
 
-注册表知道「装了什么」，说不准「怎么打开」，所以目标按四级找：`DisplayIcon` 里那个真存在的 exe → 开始菜单同名快捷方式 → 安装目录里同名的 exe → 卸载串里那个不是卸载器的 exe，全落空就用安装目录（点开是文件夹），一条路径都没有的算 `unresolved` 报数、不收卡片。两条踩过的坑：
+注册表知道「装了什么」，说不准「怎么打开」，所以目标按六级找：`DisplayIcon` 里那个真存在的 exe → `DisplayIcon` 指的是快捷方式的 → 开始菜单同名快捷方式（名字带厂商前缀也认，`Nsight Compute 2026.1.0` 对 `NVIDIA Nsight Compute 2026.1.0`）→ 安装目录自己就是 exe → 已知那几个目录（安装目录、**卸载器所在目录**、`DisplayIcon` 所在目录）里名字对得上的 exe → 卸载串里那个不是卸载器的 exe；全落空就用目录本身（点开是文件夹），一条路径都没有的算 `unresolved` 报数、不收卡片。`InstallLocation` 为空是常态，所以卸载器那个 `unins000.exe` 虽然不能当目标，**它所在的目录一定要拿去翻主程序**（Charles、Navicat 这类就是这么找回来的）。还有一条：他自己搬过目录的软件，注册表里留的是老路径，`relocated` 会退一层再认一次。两处踩过的坑：
 
 - **`DisplayIcon` 不能拿去判系统应用**——MSI 的图标全在 `C:\Windows\Installer` 里，按它判会把正经软件成片挡掉；系统判定只看安装目录和真目标。
 - **安装器不是程序本体**——`Docker Desktop Installer.exe`、`ProgramData\Package Cache\...\XxxSetup.exe` 点开来是重装/修复向导，`usable_exe` 一律不收这种路径。

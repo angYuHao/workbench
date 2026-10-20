@@ -5,9 +5,10 @@
 //! 版本和发行商；没装过的绿色版不在这里。
 //!
 //! 注册表的弱点在「怎么打开它」：`InstallLocation` 常常是空的，`DisplayIcon` 又经常指着
-//! 卸载器图标（`…\uninstallerIcon.ico`、`app.exe,0`）。所以启动目标按四级找：
-//! **DisplayIcon 里那个真存在的 exe → 开始菜单里同名快捷方式 → 安装目录里同名的 exe →
-//! 卸载串里那个不是卸载器的 exe**，全落空就用安装目录本身（点开是文件夹），
+//! 卸载器图标（`…\uninstallerIcon.ico`、`app.exe,0`）。所以启动目标按六级找：
+//! **DisplayIcon 里那个真存在的 exe → DisplayIcon 指的是快捷方式的 → 开始菜单里同名快捷方式 →
+//! 安装目录自己就是 exe → 已知那几个目录（安装目录、卸载器所在目录、DisplayIcon 所在目录）里
+//! 名字对得上的 exe → 卸载串里那个不是卸载器的 exe**，全落空就用目录本身（点开是文件夹），
 //! 连目录都没有的算「找不到」，不收卡片、只在账单里报数。
 //!
 //! 同步之前先过一遍过滤名单（设置 → 应用过滤）：命中的一律不收。
@@ -275,9 +276,9 @@ fn describe(entry: &Entry) -> Option<String> {
     }
 }
 
-/// 按四级顺序找启动目标；前一级落空才走下一级
+/// 按六级顺序找启动目标；前一级落空才走下一级
 pub(crate) fn resolve(entry: &Entry, shortcuts: &[Shortcut]) -> Resolved {
-    let icon = clean_path(&entry.display_icon);
+    let icon = relocated(&clean_path(&entry.display_icon)).unwrap_or_default();
     let mut icons = Vec::new();
     if !icon.is_empty() {
         icons.push(icon.clone());
@@ -302,31 +303,81 @@ pub(crate) fn resolve(entry: &Entry, shortcuts: &[Shortcut]) -> Resolved {
         return Resolved { target: sc.target.clone(), icons: both, found: Found::Shortcut };
     }
 
-    let location = clean_path(&entry.install_location);
-    // 3. 安装目录里那个和程序同名的 exe
+    let location = relocated(&clean_path(&entry.install_location)).unwrap_or_default();
+    // 3. 安装目录自己就是个 exe
     if usable_exe(&location) {
         return Resolved { target: location.clone(), icons, found: Found::Exe };
     }
-    let mut folder: Option<String> = None;
+    // 4. 注册表不写 InstallLocation 是常事，但卸载器和 DisplayIcon 走不了，于是它们所在的
+    //    目录就是唯一说到位置的地方——进去找那个和程序名对得上的 exe
+    let mut dirs: Vec<String> = Vec::new();
     if !location.is_empty() && Path::new(&location).is_dir() {
-        if let Some(exe) = exe_named_like(&location, &entry.name) {
+        dirs.push(location.clone());
+    }
+    let uninstall = relocated(&clean_path(&entry.uninstall)).unwrap_or_default();
+    for hint in [icon.as_str(), uninstall.as_str()] {
+        if let Some(dir) = parent_dir(hint) {
+            if !dirs.iter().any(|d| path_key(d) == dir) && !path_key(&dir).contains(PACKAGE_CACHE_MARK) {
+                dirs.push(dir);
+            }
+        }
+    }
+    for dir in &dirs {
+        if let Some(exe) = exe_named_like(dir, &entry.name) {
             return Resolved { target: exe, icons, found: Found::Exe };
         }
-        folder = Some(location.clone());
     }
 
-    // 4. 卸载串里那个不是卸载器的 exe（有的程序把主程序和卸载器放一起）
+    // 5. 卸载串里那个不是卸载器的 exe（有的程序把主程序和卸载器放一起）
     if let Some(exe) = command_exe(&entry.uninstall) {
         if usable_exe(&exe) {
             return Resolved { target: exe, icons, found: Found::Exe };
         }
     }
 
-    // 5. 兜底：点开是安装目录，总比一张点不动的卡片有用
-    match folder {
-        Some(dir) => Resolved { target: dir, icons, found: Found::Folder },
+    // 6. 兜底：点开是安装目录，总比一张点不动的卡片有用
+    match dirs.first() {
+        Some(dir) => Resolved { target: dir.clone(), icons, found: Found::Folder },
         None => Resolved { target: String::new(), icons, found: Found::Nothing },
     }
+}
+
+/// 一个路径的所在目录（文件才算，目录本身不算）
+fn parent_dir(path: &str) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    let p = Path::new(path);
+    if !p.is_file() {
+        return None;
+    }
+    Some(p.parent()?.to_string_lossy().to_string())
+}
+
+/// 装完又自己搬过目录的软件，注册表里那条还是老写法：整条路径不存在时，往上退一层再认一次。
+/// Navicat 就是这样——`InstallLocation` 写成 `F:\Program\Navicat Premium 15\Navicat Premium 15\`，
+/// 东西实际在上一层。只退一层：再往上就会撞进无关的兄弟目录了。
+fn relocated(path: &str) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    let p = Path::new(path);
+    if p.exists() {
+        return Some(path.to_string());
+    }
+    let up = p.parent()?;
+    let candidate = if p.extension().is_some() {
+        // 看着像文件：去掉最后那段目录，文件名留着
+        up.parent()?.join(p.file_name()?)
+    } else {
+        // 看着像目录：直接少最后一段
+        up.to_path_buf()
+    };
+    // 退一层以后要么整条不存在，要么就是个空目录——那不算救回来
+    if !candidate.exists() {
+        return None;
+    }
+    Some(candidate.to_string_lossy().to_string())
 }
 
 /// 名字对上就取它；注册表里的名字常带厂商前缀和版本号，所以先严格相等、再去掉版本号、
@@ -350,7 +401,7 @@ fn find_shortcut<'a>(name: &str, shortcuts: &'a [Shortcut]) -> Option<&'a Shortc
         if s.key.len() < 4 {
             continue;
         }
-        if (s.key.starts_with(&key) || key.starts_with(&s.key))
+        if (s.key.contains(&key) || key.contains(&s.key))
             && best.map(|b| s.key.len() < b.key.len()).unwrap_or(true)
         {
             best = Some(s);
@@ -359,26 +410,35 @@ fn find_shortcut<'a>(name: &str, shortcuts: &'a [Shortcut]) -> Option<&'a Shortc
     best
 }
 
-/// 安装目录顶层里和程序同名的那个 exe
+/// 目录顶层那个和程序名对得上的 exe：先是全等，再去掉版本号，最后允许「exe 名是产品名的
+/// 一段」——`navicat.exe` 对 `PremiumSoft Navicat Premium 15.0`、`charles.exe` 对 `Charles 4.6.7`
+/// 都是靠这一段才对上的
 fn exe_named_like(dir: &str, name: &str) -> Option<String> {
     let key = name_key(name);
     let short = short_key(name);
     let entries = std::fs::read_dir(dir).ok()?;
     let mut loose: Option<String> = None;
+    let mut contains: Option<String> = None;
     for entry in entries.flatten() {
         let path = entry.path();
-        if !usable_exe(&path.to_string_lossy()) {
+        let as_str = path.to_string_lossy().to_string();
+        if !usable_exe(&as_str) {
             continue;
         }
-        let stem = name_key(&path.file_stem()?.to_string_lossy());
+        let stem = name_key(Path::new(&as_str).file_stem()?.to_string_lossy().as_ref());
+        if stem.is_empty() {
+            continue;
+        }
         if stem == key {
-            return Some(path.to_string_lossy().to_string());
+            return Some(as_str);
         }
         if short.len() >= 4 && stem == short {
-            loose = Some(path.to_string_lossy().to_string());
+            loose = Some(as_str.clone());
+        } else if stem.len() >= 5 && (key.contains(&stem) || stem.contains(&key)) {
+            contains = Some(as_str);
         }
     }
-    loose
+    loose.or(contains)
 }
 
 fn count_rows(conn: &Connection) -> AppResult<usize> {
@@ -793,7 +853,8 @@ mod tests {
         std::fs::create_dir_all(dir.join("Aura")).unwrap();
 
         let by_name = resolve(&Entry { display_icon: installer, ..entry("Docker Desktop") }, &[]);
-        assert_eq!(by_name.found, Found::Nothing, "安装器 exe 不该被当成目标");
+        assert_eq!(by_name.found, Found::Folder, "安装器 exe 不该被当成目标");
+        assert_eq!(by_name.target, dir.join("Docker").to_string_lossy().to_string());
 
         let by_path = resolve(
             &Entry {
@@ -805,6 +866,49 @@ mod tests {
         );
         assert_eq!(by_path.found, Found::Folder, "Package Cache 里那个是重装程序");
         assert_eq!(by_path.target, dir.join("Aura").to_string_lossy().to_string());
+    }
+
+    #[test]
+    fn a_moved_install_folder_still_resolves() {
+        let dir = sandbox("moved");
+        let real = touch(&dir, r"Navicat Premium 15\navicat.exe");
+        let stale = dir.join(r"Navicat Premium 15\Navicat Premium 15\navicat.exe");
+        let e = Entry {
+            display_icon: stale.to_string_lossy().to_string(),
+            install_location: stale.parent().unwrap().to_string_lossy().to_string(),
+            ..entry("PremiumSoft Navicat Premium 15.0")
+        };
+
+        let r = resolve(&e, &[]);
+        assert_eq!(r.found, Found::Exe, "搬过目录留下的旧路径要能退一层认出来");
+        assert_eq!(path_key(&r.target), path_key(&real));
+    }
+
+    #[test]
+    fn the_uninstaller_folder_holds_the_real_program() {
+        let dir = sandbox("unins-folder");
+        let exe = touch(&dir, r"Navicat\navicat.exe");
+        let unins = touch(&dir, r"Navicat\unins000.exe");
+        // Inno Setup 那一类：InstallLocation 是空的，只有卸载串说到这个目录
+        let e = Entry {
+            uninstall: format!(r#""{unins}""#),
+            ..entry("PremiumSoft Navicat Premium 15.0")
+        };
+
+        let r = resolve(&e, &[]);
+        assert_eq!(r.found, Found::Exe, "卸载器旁边就是主程序，得进去找");
+        assert_eq!(path_key(&r.target), path_key(&exe));
+    }
+
+    #[test]
+    fn the_package_cache_folder_is_not_scanned_for_a_program() {
+        let dir = sandbox("cache-scan");
+        touch(&dir, r"Package Cache\{62b10058}\tool.exe");
+        let unins = touch(&dir, r"Package Cache\{62b10058}\unins000.exe");
+        let e = Entry { uninstall: format!(r#""{unins}""#), ..entry("Some MSI Thing") };
+
+        let r = resolve(&e, &[]);
+        assert_eq!(r.found, Found::Nothing, "MSI 缓存目录里不该被翻出一个「主程序」");
     }
 
     /// 开始菜单的同名快捷方式排在安装目录前面：目标准、图标也是 shell 算好的那张
@@ -1090,6 +1194,7 @@ mod tests {
         }];
         // 注册表那条多了版本号：严格相等对不上，去版本号才对上
         assert!(find_shortcut("Loomy 1.2.3", &sc).is_some());
+        assert!(find_shortcut("NVIDIA Loomy 1.2", &sc).is_some());
         assert!(find_shortcut("完全不同的东西", &sc).is_none());
     }
 
@@ -1148,6 +1253,16 @@ mod tests {
             tiers[2],
             tiers[3]
         );
+        // 「哪些条目连目录都没给出来」是最容易挨问的一类：名字和卸载键末段一起打出来，
+        // 下次他说某个软件没进卡片，先在这里看它是不是压根没登记卸载项
+        println!("  什么都没找到的那些：");
+        for e in entries.iter().filter(|e| resolve(e, &shortcuts).found == Found::Nothing).take(30) {
+            println!(
+                "    - {} | {}",
+                e.name,
+                e.reg_key.rsplit('\\').next().unwrap_or("")
+            );
+        }
         for e in &entries[..entries.len().min(15)] {
             let r = resolve(e, &shortcuts);
             println!("  {} [{:?}] -> {}", e.name, r.found, r.target);
