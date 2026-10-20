@@ -49,6 +49,8 @@ grep -c 'commands::' src/lib.rs
 
 - **`DisplayIcon` 不能拿去判系统应用**——MSI 的图标全在 `C:\Windows\Installer` 里，按它判会把正经软件成片挡掉；系统判定只看安装目录和真目标。
 - **安装器不是程序本体**——`Docker Desktop Installer.exe`、`ProgramData\Package Cache\...\XxxSetup.exe` 点开来是重装/修复向导，`usable_exe` 一律不收这种路径。
+- **0 字节的 exe 不是能跑的东西**——WPS 自更新会把安装根目录的 `ksolaunch.exe` 换成空壳（真身改名成 `ksolaunch.bak.exe`），而注册表的 `DisplayIcon` 和开始菜单快捷方式都还指着它，症状就是「文件在、点不动」。`runnable()` 见到空文件一律拒。
+- **注册表给的目录常常不是主程序那一层**——`exe_near()` 从已知目录往上退一层、再往隔壁的子目录各看一层（WPS 的真身在 `<版本>\office6\wps.exe`，注册表只给到 `<版本>\utility\uninst.exe`）。松匹配几档之间取**名字最短**的那个候选，所以拿到的是 `wps.exe` 而不是首页启动器 `wpsoffice.exe`；一个条目最多翻 60 个目录（`MAX_SCAN_DIRS`），宁可找不到目标也不去扫整块盘。
 
 「过滤系统应用」那个开关（`SYSTEM_NAME_MARKS`）现在管三类：附属程序（update / runtime / redistributable / 组件…）、驱动（driver / 驱动 / chipset / ODBC）、运行环境（`.NET` / DirectX / WebView2）。**故意不收进去的词**：`python`、`node`、`java`、`sdk`、`audio`——那是他自己装来用的软件，一刀切会把 Python、Node.js、Audacity 一起带走（Java 那种名字里带 "Update" 的顺挡，属于巧合不是规则）。这条规则最怕切错，所以真机那条 `#[ignore]` 测试会把**挡掉的名单**和**收进来的名单**都整片打出来，改 marks 之前先跑一遍看这两张表。
 

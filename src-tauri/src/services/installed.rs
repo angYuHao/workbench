@@ -372,10 +372,8 @@ pub(crate) fn resolve(entry: &Entry, shortcuts: &[Shortcut]) -> Resolved {
             }
         }
     }
-    for dir in &dirs {
-        if let Some(exe) = exe_named_like(dir, &entry.name) {
-            return Resolved { target: exe, icons, found: Found::Exe };
-        }
+    if let Some(exe) = exe_near(&dirs, &entry.name) {
+        return Resolved { target: exe, icons, found: Found::Exe };
     }
 
     // 5. 卸载串里那个不是卸载器的 exe（有的程序把主程序和卸载器放一起）
@@ -460,35 +458,75 @@ fn find_shortcut<'a>(name: &str, shortcuts: &'a [Shortcut]) -> Option<&'a Shortc
     best
 }
 
-/// 目录顶层那个和程序名对得上的 exe：先是全等，再去掉版本号，最后允许「exe 名是产品名的
-/// 一段」——`navicat.exe` 对 `PremiumSoft Navicat Premium 15.0`、`charles.exe` 对 `Charles 4.6.7`
-/// 都是靠这一段才对上的
-fn exe_named_like(dir: &str, name: &str) -> Option<String> {
+/// 从注册表给的那几个目录往外找主程序：目录本身、它的上一层、这两层各自的直接子目录
+/// （不往下递归）。WPS 的注册表只给到 `<版本>\utility\uninst.exe`，主程序却在隔壁的
+/// `<版本>\office6\wps.exe`，不扩这一圈就找不到。
+/// 判「哪个 exe 是主程序」由严到松：全等 → 去掉版本号后全等 / 产品名以 exe 名开头 /
+/// exe 名是产品名里的一段；这几档里**取名字最短的那个**——WPS 的 `office6` 里同时有
+/// `wps.exe`、`wpsoffice.exe`、`et.exe`、`wpp.exe`，最短的那个才是这个产品本体的入口，
+/// 带后缀的是首页启动器和各组件。
+fn exe_near(dirs: &[String], name: &str) -> Option<String> {
     let key = name_key(name);
     let short = short_key(name);
-    let entries = std::fs::read_dir(dir).ok()?;
-    let mut loose: Option<String> = None;
-    let mut contains: Option<String> = None;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let as_str = path.to_string_lossy().to_string();
-        if !usable_exe(&as_str) {
-            continue;
-        }
-        let stem = name_key(Path::new(&as_str).file_stem()?.to_string_lossy().as_ref());
-        if stem.is_empty() {
-            continue;
-        }
-        if stem == key {
-            return Some(as_str);
-        }
-        if short.len() >= 4 && stem == short {
-            loose = Some(as_str.clone());
-        } else if stem.len() >= 5 && (key.contains(&stem) || stem.contains(&key)) {
-            contains = Some(as_str);
+    let mut best: Option<(usize, String)> = None;
+    let mut scanned = 0usize;
+    for start in dirs {
+        for dir in neighborhood(Path::new(start)) {
+            if scanned >= MAX_SCAN_DIRS {
+                return best.map(|(_, path)| path);
+            }
+            scanned += 1;
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let as_str = path.to_string_lossy().to_string();
+                if !usable_exe(&as_str) {
+                    continue;
+                }
+                let Some(stem_raw) = path.file_stem() else {
+                    continue;
+                };
+                let stem = name_key(stem_raw.to_string_lossy().as_ref());
+                if stem.is_empty() {
+                    continue;
+                }
+                if stem == key {
+                    return Some(as_str);
+                }
+                let named_after_it = (stem.len() >= 3 && key.starts_with(&stem))
+                    || (stem.len() >= 5 && key.contains(&stem))
+                    || (short.len() >= 4 && stem == short);
+                if named_after_it && best.as_ref().is_none_or(|(len, _)| stem.len() < *len) {
+                    best = Some((stem.len(), as_str));
+                }
+            }
         }
     }
-    loose.or(contains)
+    best.map(|(_, path)| path)
+}
+
+/// 一个目录的搜索圈：它自己、上一层、以及这两层的直接子目录（每层最多看 30 个）
+fn neighborhood(dir: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![dir.to_path_buf()];
+    if let Some(parent) = dir.parent() {
+        roots.push(parent.to_path_buf());
+    }
+    let mut out: Vec<PathBuf> = Vec::new();
+    for root in roots {
+        out.push(root.clone());
+        if let Ok(entries) = std::fs::read_dir(&root) {
+            out.extend(
+                entries
+                    .flatten()
+                    .filter(|e| e.path().is_dir())
+                    .take(30)
+                    .map(|e| e.path()),
+            );
+        }
+    }
+    out
 }
 
 fn count_rows(conn: &Connection) -> AppResult<usize> {
@@ -598,6 +636,9 @@ const SYSTEM_MARKS: [&str; 4] = [
     "/program files/windows defender/",
     "/program files/windows security/",
 ];
+
+/// 一个条目最多翻多少个目录：宁可找不到目标，也不要在一次同步里把整块盘扫一遍
+const MAX_SCAN_DIRS: usize = 60;
 
 /// MSI 安装器缓存住的那个目录：里面的 exe 是重装/修复用的，不是程序本体
 const PACKAGE_CACHE_MARK: &str = "/package cache/";
@@ -713,7 +754,14 @@ fn expand_vars(s: &str) -> String {
 }
 
 fn is_exe_file(path: &str) -> bool {
-    !path.is_empty() && extension_of(Path::new(path)) == "exe" && Path::new(path).is_file()
+    !path.is_empty() && extension_of(Path::new(path)) == "exe" && runnable(Path::new(path))
+}
+
+/// 存在、是文件、而且**不是 0 字节**：WPS 自更新会在安装根目录留一个空的 `ksolaunch.exe`
+/// （真身被改名成 `ksolaunch.bak.exe`），注册表的 `DisplayIcon` 和开始菜单快捷方式都还指着
+/// 那个空壳——文件在、点不动。空文件一律不算能跑的东西。
+fn runnable(p: &Path) -> bool {
+    p.metadata().map(|m| m.is_file() && m.len() > 0).unwrap_or(false)
 }
 
 /// 能拿去当启动目标的 exe：文件在、是 exe、不是卸载器/安装器，也不是 MSI 缓存在
@@ -741,7 +789,7 @@ fn program_target(target: &str) -> bool {
         return true;
     }
     let p = Path::new(target);
-    p.is_file()
+    runnable(p)
         && matches!(
             extension_of(p).as_str(),
             "exe" | "lnk" | "bat" | "cmd" | "com" | "scr" | "msi" | "appref-ms"
@@ -753,7 +801,7 @@ fn launchable(target: &str) -> bool {
         return true;
     }
     let path = Path::new(target);
-    if !path.is_file() {
+    if !runnable(path) {
         return false;
     }
     // 目标是图标文件的那种快捷方式是安装程序顺手放的（Charles、Cpolar 都这样），
@@ -1093,6 +1141,32 @@ mod tests {
 
         let r = resolve(&e, &[]);
         assert_eq!(r.found, Found::Exe, "搬过目录留下的旧路径要能退一层认出来");
+        assert_eq!(path_key(&r.target), path_key(&real));
+    }
+
+    /// WPS 那种布局：`DisplayIcon` 是自更新留下的 0 字节空壳，注册表给的卸载器目录
+    /// `<版本>\utility\uninst.exe` 旁边也没主程序，真身在隔壁的 `<版本>\office6\wps.exe`
+    #[test]
+    fn wps_layout_skips_the_empty_stub_and_finds_the_real_program() {
+        let dir = sandbox("wps");
+        let stub = dir.join("ksolaunch.exe");
+        std::fs::write(&stub, b"").unwrap();
+        let real = touch(&dir, r"WPS Office\12.1.0.25865\office6\wps.exe");
+        touch(&dir, r"WPS Office\12.1.0.25865\office6\wpsoffice.exe");
+        touch(&dir, r"WPS Office\12.1.0.25865\office6\et.exe");
+        let uninst = touch(&dir, r"WPS Office\12.1.0.25865\utility\uninst.exe");
+        assert!(
+            !usable_exe(&stub.to_string_lossy()),
+            "0 字节的 exe 不该当成能跑的东西"
+        );
+
+        let e = Entry {
+            display_icon: stub.to_string_lossy().to_string(),
+            uninstall: format!(r#""{}""#, uninst),
+            ..entry("WPS Office (12.1.0.25865)")
+        };
+        let r = resolve(&e, &[]);
+        assert_eq!(r.found, Found::Exe, "空壳不能当目标，得往隔壁的 office6 里找");
         assert_eq!(path_key(&r.target), path_key(&real));
     }
 
