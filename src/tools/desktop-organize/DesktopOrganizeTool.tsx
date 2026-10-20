@@ -54,13 +54,17 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
     void scan();
   }, []);
 
+  /** 只算开着的规则：关掉的规则不参与归类（后端 match_category 就过滤 enabled），
+   *  它的分类名也不该继续在左边占一行、在下拉里当一个去向 */
   const categoryOptions = useMemo(
     () =>
-      [...new Set(rules.map((r) => r.category.trim()).filter(Boolean))].map((n) => ({ label: n, value: n })),
+      [...new Set(rules.filter((r) => r.enabled).map((r) => r.category.trim()).filter(Boolean))].map((n) => ({
+        label: n,
+        value: n,
+      })),
     [rules]
   );
-  /** 左边那一列只列分类规则里的分类名：规则没命中的那些不算一个分类，只在「全部」里看得见，
-   *  要它也成一行就去分类规则里加一条 */
+  /** 左边那一列只列开着的规则里的分类名：关掉的规则、以及没规则命中的文件都不成行 */
   const catRows = useMemo(() => {
     const counts = new Map<string, number>();
     for (const it of items) counts.set(it.category, (counts.get(it.category) ?? 0) + 1);
@@ -152,9 +156,9 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
                 onClick={() => setActiveCat(c.name)}
               />
             ))}
-            {!rules.length && (
+            {!categoryOptions.length && (
               <div className="label" style={{ marginTop: 8 }}>
-                还没有分类规则：没有规则命中就什么都不整理。点上面的「分类规则」加一条。
+                没有开着的分类规则：没有规则命中就什么都不整理。点上面的「分类规则」加一条或把它打开。
               </div>
             )}
           </div>
@@ -242,7 +246,17 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
         </div>
       </Modal>
 
-      <Modal title="分类规则" open={rulesOpen} onCancel={() => setRulesOpen(false)} footer={null} width={760}>
+      {/* 规则改完（开关、改名、删条）重新扫一遍：哪一项归哪个分类是规则算出来的，不重扫屏上就是旧账 */}
+      <Modal
+        title="分类规则"
+        open={rulesOpen}
+        onCancel={() => {
+          setRulesOpen(false);
+          void scan();
+        }}
+        footer={null}
+        width={760}
+      >
         <RulesSection onAdd={() => setEdit(blankRule)} onEdit={(rule) => setEdit(rule)} />
       </Modal>
 
