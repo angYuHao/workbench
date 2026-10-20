@@ -5,15 +5,7 @@ import {
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
 import * as api from "../api/categories";
-import {
-  clearWakeHotkey,
-  getSettings,
-  loadWakeHotkey,
-  setCloseToTray,
-  setSetting,
-  setWakeHotkey,
-} from "../api/settings";
-import type { WakeHotkey } from "../api/settings";
+import { getSettings, setCloseToTray, setSetting } from "../api/settings";
 import { useDesktopStore } from "./desktop";
 import type { DesktopRule } from "../types";
 
@@ -24,12 +16,6 @@ interface SettingsStore {
   autostart: boolean;
   theme: Theme;
   closeToTray: boolean;
-  /** 界面上该显示哪个唤醒热键写法；空串 = 没有（没设过、或明确清掉了） */
-  wakeHotkey: string;
-  /** 这一会儿真挂着生效的是不是它 */
-  wakeHotkeyBound: boolean;
-  /** 注册不上的原话；生效时是空串 */
-  wakeHotkeyError: string;
   loadRules: () => Promise<void>;
   saveRule: (rule: DesktopRule) => Promise<void>;
   removeRule: (id: number) => Promise<void>;
@@ -38,9 +24,6 @@ interface SettingsStore {
   loadLocalPrefs: () => Promise<void>;
   toggleTheme: () => Promise<void>;
   toggleCloseToTray: (on: boolean) => Promise<void>;
-  loadWakeHotkey: () => Promise<WakeHotkey>;
-  bindWakeHotkey: (key: string) => Promise<WakeHotkey>;
-  dropWakeHotkey: () => Promise<WakeHotkey>;
 }
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -48,9 +31,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   autostart: false,
   theme: "light",
   closeToTray: true,
-  wakeHotkey: "",
-  wakeHotkeyBound: false,
-  wakeHotkeyError: "",
   loadRules: async () => set({ rules: await api.getRules() }),
   saveRule: async (rule) => {
     await api.saveRule(rule);
@@ -73,25 +53,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const settings = await getSettings();
     set({
       theme: settings.theme === "dark" ? "dark" : "light",
-      // 没存过就算开：唤醒热键要靠窗口能隐藏，默认关着的话热键没意义
+      // 没存过就算开：关掉的话点窗口关闭键就是真退出，托盘这个入口也就没有了
       closeToTray: settings.close_to_tray !== "0",
     });
-  },
-  /** 装载存的热键：注册不上不抛错，后端把「挂的是哪个、生效没有」一起带回来 */
-  loadWakeHotkey: async () => {
-    const r = await loadWakeHotkey();
-    set({ wakeHotkey: r.key, wakeHotkeyBound: r.bound, wakeHotkeyError: r.error });
-    return r;
-  },
-  bindWakeHotkey: async (key) => {
-    const r = await setWakeHotkey(key);
-    set({ wakeHotkey: r.key, wakeHotkeyBound: r.bound, wakeHotkeyError: r.error });
-    return r;
-  },
-  dropWakeHotkey: async () => {
-    const r = await clearWakeHotkey();
-    set({ wakeHotkey: r.key, wakeHotkeyBound: r.bound, wakeHotkeyError: r.error });
-    return r;
   },
   toggleTheme: async () => {
     const nextTheme: Theme = get().theme === "dark" ? "light" : "dark";

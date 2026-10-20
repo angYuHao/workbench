@@ -2,19 +2,15 @@ import { useEffect } from "react";
 import { RouterProvider } from "react-router-dom";
 import { router } from "./app/router";
 import { useSettingsStore } from "./stores/settings";
-import { MessageContainer, ConfirmContainer, message } from "./ui";
+import { MessageContainer, ConfirmContainer } from "./ui";
 
 export default function App() {
   const theme = useSettingsStore((s) => s.theme);
   const loadLocalPrefs = useSettingsStore((s) => s.loadLocalPrefs);
-  const loadWakeHotkey = useSettingsStore((s) => s.loadWakeHotkey);
 
   useEffect(() => {
     loadLocalPrefs();
-    // 装载热键不再靠抛错提示：默认键被占是常事，每次都弹一句反而成了噪音。
-    // 「挂的是哪个键、有没有生效」写在设置那一行里，去看得到、也看得懂
-    loadWakeHotkey().catch((e) => message.error(String(e)));
-  }, [loadLocalPrefs, loadWakeHotkey]);
+  }, [loadLocalPrefs]);
 
   useEffect(() => {
     document.body.classList.toggle("dark", theme === "dark");
