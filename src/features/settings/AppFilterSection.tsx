@@ -38,7 +38,7 @@ export default function AppFilterSection() {
     setSystem(on);
     try {
       await setSetting(SYSTEM_KEY, on ? "1" : "0");
-      message.success(on ? "之后同步会跳过 Windows 自带的那些程序" : "系统应用不再跳过，下次同步会一起收进来");
+      message.success(on ? "之后同步会跳过系统应用、驱动和运行环境" : "这些不再跳过，下次同步会一起收进来");
       setReport(null);
     } catch (e) {
       setSystem(!on);
@@ -96,12 +96,13 @@ export default function AppFilterSection() {
           <Filter size={16} strokeWidth={1.6} />
         </span>
         <div className="settings-line-text">
-          <div className="settings-line-title">过滤系统应用</div>
+          <div className="settings-line-title">过滤系统应用、驱动和运行环境</div>
           <div className="settings-line-desc">
             注册表里那些「装过但不是给你用的东西」：明写自己是系统组件的、挂在别的程序底下的补丁、
-            名字带 更新程序 / 运行库 / redistributable 的附属程序，以及装在 Windows 目录里的
-            （含微软商店的 WindowsApps）。第三方软件不算：它们装在 Program Files 下，
-            图标虽然在 <b>C:\Windows\Installer</b> 里也不影响。
+            名字带 更新程序 / 运行库 / redistributable 的附属程序、厂商驱动包（名字里有 driver / 驱动 /
+            chipset / ODBC 的），以及 .NET、DirectX、WebView2 这类给别人用的运行环境；装在 Windows
+            目录里的（含微软商店的 WindowsApps）也算。自己装来用的开发工具不算：Python、Node.js、
+            Audacity 这种都不会被挡。第三方软件也不因为图标住在 <b>C:\Windows\Installer</b> 就被当成系统应用。
           </div>
         </div>
         <Switch checked={system} onChange={(on) => void handleToggleSystem(on)} />

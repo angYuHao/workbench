@@ -37,7 +37,7 @@ grep -c 'commands::' src/lib.rs
 
 `win::lnk::resolve_lnk`（`IShellLinkW`）和 `win::icon::extract_icon_to_png` 都不自己 `CoInitializeEx`，**线程没初始化 COM 就整片失败**：前者失败会悄悄退回「快捷方式自己的路径」（看着像解析出了 .lnk），后者失败就是每张卡片都没图。
 
-同步命令（非 async）跑在主线程上，tao/WebView2 已经把 COM 起好了，所以 `scan_desktop`、`sync_installed_apps` 在应用里是好的。**在测试线程里直接调这两个 API 会全灭**，要照着 `services::installed::tests::the_real_registry_lists_installed_programs` 那样先 `CoInitializeEx(None, COINIT_APARTMENTTHREADED)`；那条 `#[ignore]` 的测试就是拿真注册表核对这一步的（本机读出 353 条卸载项，收进来 61 个、抽到 60 张图标）。
+同步命令（非 async）跑在主线程上，tao/WebView2 已经把 COM 起好了，所以 `scan_desktop`、`sync_installed_apps` 在应用里是好的。**在测试线程里直接调这两个 API 会全灭**，要照着 `services::installed::tests::the_real_registry_lists_installed_programs` 那样先 `CoInitializeEx(None, COINIT_APARTMENTTHREADED)`；那条 `#[ignore]` 的测试就是拿真注册表核对这一步的（本机读出 352 条卸载项：挡掉 232、收进来 60、抽到 59 张图标、35 条认不出目标）。
 
 ## 「应用」页的数据源是注册表，不是目录扫描
 
@@ -47,6 +47,8 @@ grep -c 'commands::' src/lib.rs
 
 - **`DisplayIcon` 不能拿去判系统应用**——MSI 的图标全在 `C:\Windows\Installer` 里，按它判会把正经软件成片挡掉；系统判定只看安装目录和真目标。
 - **安装器不是程序本体**——`Docker Desktop Installer.exe`、`ProgramData\Package Cache\...\XxxSetup.exe` 点开来是重装/修复向导，`usable_exe` 一律不收这种路径。
+
+「过滤系统应用」那个开关（`SYSTEM_NAME_MARKS`）现在管三类：附属程序（update / runtime / redistributable / 组件…）、驱动（driver / 驱动 / chipset / ODBC）、运行环境（`.NET` / DirectX / WebView2）。**故意不收进去的词**：`python`、`node`、`java`、`sdk`、`audio`——那是他自己装来用的软件，一刀切会把 Python、Node.js、Audacity 一起带走（Java 那种名字里带 "Update" 的顺挡，属于巧合不是规则）。这条规则最怕切错，所以真机那条 `#[ignore]` 测试会把**挡掉的名单**和**收进来的名单**都整片打出来，改 marks 之前先跑一遍看这两张表。
 
 `hits` 匹配过滤模式时名字要比两份：折小写的原样名字（带括号和版本号，「7-Zip 23.01 (x64)」这种从卡片名照抄的模式要能命中）和只留字母数字的那份。
 

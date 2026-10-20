@@ -422,8 +422,9 @@ fn hits(entry: &Entry, target: &str, filters: &Filters, system_root: &str) -> bo
     })
 }
 
-/// 「系统应用」在注册表里有三种长相：明写自己是系统组件的、挂在别的程序底下的补丁、
-/// 以及名字一听就是附属程序的（更新程序、运行库、 redistributable）。
+/// 「系统应用」这个开关管的东西在注册表里有几种长相：明写自己是系统组件的、挂在别的程序底下的
+/// 补丁、以及名字一听就是附属程序 / 驱动 / 运行环境的（见 `SYSTEM_NAME_MARKS`），
+/// 再加上装在 Windows 目录里的那些。
 /// 路径只按安装目录和真目标判：**MSI 的 DisplayIcon 全在 `C:\Windows\Installer` 里**，
 /// 拿它判系统会把一堆正经软件一起挡掉。
 fn is_system(entry: &Entry, target: &str, system_root: &str) -> bool {
@@ -449,7 +450,16 @@ fn is_system(entry: &Entry, target: &str, system_root: &str) -> bool {
         })
 }
 
-const SYSTEM_NAME_MARKS: [&str; 9] = [
+/// 「系统应用」这个开关名下的三类东西，都是「装过但没人会从启动器打开」的：
+///
+/// - 附属程序：更新程序、补丁、运行库、帮助组件
+/// - 驱动：厂商驱动包和芯片组包（ODBC 这类数据库驱动也算）
+/// - 运行环境：`.NET` / DirectX / WebView2 这些给别人用的底座
+///
+/// **故意不在这儿**：`python`、`node`、`java`、`sdk`、`audio` 这类词——那是他自己装来用（或就是
+/// 一款软件）的东西，`Java` 那种名字里带 "Update" 的会顺带被挡掉，但不该按词根一刀切。
+const SYSTEM_NAME_MARKS: &[&str] = &[
+    // 附属程序
     "redistributable",
     "update",
     "updater",
@@ -459,6 +469,17 @@ const SYSTEM_NAME_MARKS: [&str; 9] = [
     "helper",
     "更新",
     "运行库",
+    // 驱动
+    "driver",
+    "驱动",
+    "chipset",
+    "odbc",
+    // 运行环境
+    ".net",
+    "directx",
+    "webview2",
+    "运行环境",
+    "组件",
 ];
 
 const SYSTEM_MARKS: [&str; 4] = [
@@ -954,6 +975,21 @@ mod tests {
 
         assert!(hits(&entry("Microsoft Edge Update"), &exe, &with_system, root), "更新程序是附属程序");
         assert!(hits(&entry("Microsoft Visual C++ 2015  redistributable - x64"), &exe, &with_system, root));
+        // 驱动
+        assert!(hits(&entry("Realtek High Definition Audio Driver"), &exe, &with_system, root));
+        assert!(hits(&entry("英特尔(R) 无线显示器驱动"), &exe, &with_system, root));
+        assert!(hits(&entry("Microsoft ODBC Driver 17 for SQL Server"), &exe, &with_system, root));
+        assert!(hits(&entry("AMD Chipset Software"), &exe, &with_system, root));
+        // 运行环境
+        assert!(hits(&entry("Microsoft .NET Runtime 8.0.5 (x64)"), &exe, &with_system, root));
+        assert!(hits(&entry("DirectX 运行库"), &exe, &with_system, root));
+        assert!(hits(&entry("Microsoft Edge WebView2 Runtime"), &exe, &with_system, root));
+        assert!(hits(&entry("某某常用组件"), &exe, &with_system, root));
+        // 他自己装来用的东西不算环境：这些要是被挡了，就是词根切得太狠
+        assert!(!hits(&entry("Python 3.11.7 (64-bit)"), &exe, &with_system, root));
+        assert!(!hits(&entry("Node.js 20.11.0"), &exe, &with_system, root));
+        assert!(!hits(&entry("Audacity 3.5.1"), &exe, &with_system, root));
+        assert!(!hits(&entry("Android Studio"), &exe, &with_system, root));
         let mut under_windows = entry("资源管理器附带");
         under_windows.install_location = format!(r"{root}\System32");
         assert!(hits(&under_windows, &exe, &with_system, root));
@@ -1117,6 +1153,22 @@ mod tests {
             println!("  {} [{:?}] -> {}", e.name, r.found, r.target);
         }
 
+        // 把「按系统/驱动/环境挡掉了谁」整片打出来：这条规则最怕的就是切太狠，
+        // 光看个数看不出来，得逐个名字过一遍
+        let root = system_root();
+        let blocked: Vec<&str> = entries
+            .iter()
+            .filter(|e| {
+                let target = resolve(e, &shortcuts).target;
+                e.system_component || e.is_patch || is_system(e, &target, &root)
+            })
+            .map(|e| e.name.as_str())
+            .collect();
+        println!("被系统/驱动/环境这条挡掉的 {} 个：", blocked.len());
+        for name in &blocked {
+            println!("  - {name}");
+        }
+
         let c = conn();
         let report = plan(&c, &entries, &shortcuts, &get_icon_dir().unwrap(), false).unwrap();
         let with_icon: i64 = c
@@ -1138,8 +1190,9 @@ mod tests {
             report.scanned
         );
 
+        // 收进来的名字整片打出来：过滤这条最怕的是切错东西，光看个数看不出来
         let examples: Vec<(String, String, Option<String>)> = c
-            .prepare("SELECT name, target, description FROM apps ORDER BY name LIMIT 10")
+            .prepare("SELECT name, target, description FROM apps ORDER BY name LIMIT 80")
             .unwrap()
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .unwrap()
