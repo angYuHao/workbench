@@ -5,7 +5,7 @@ Tauri 2 + React 18 + Rust + SQLite，**没有服务端、没有账号、没有�
 
 *A single-machine Windows workbench: an app launcher built from your Start Menu, a bookmark manager, a file browser with preview, and a toolbox (desktop organizer, 2FA vault). No server, no account, no telemetry — everything stays local.*
 
-侧栏四个页面，底部两个入口：深浅色切换、设置（弹窗，不占路由）。窗口 1200×800，最小 960×640。
+- **只增不改**：你改过的名字、手动归好的分类、抽好的图标，一次同步都不会抹掉。判「是不是同一个程序」只看**名字**（完全一样，或者去掉标点后一个是另一个的一段；短于四个字的段不算，`Git` 不会把 `GitHub CLI` 吞掉）——**不看目标文件**，因为一个启动器养一片程序的情况太多：Steam 每个游戏的 `DisplayIcon` 都是 `steam.exe`，按文件去重会只剩一张（Steam 自己就是这么没的）。桌面上那 60 张老卡片一张不少，跟注册表读出来的程序并排显示。
 
 ## 装上就能用
 

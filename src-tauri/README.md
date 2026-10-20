@@ -54,6 +54,8 @@ grep -c 'commands::' src/lib.rs
 
 `hits` 匹配过滤模式时名字要比两份：折小写的原样名字（带括号和版本号，「7-Zip 23.01 (x64)」这种从卡片名照抄的模式要能命中）和只留字母数字的那份。
 
+去重只认名字（`same_program`）：名字相等、或者去掉标点后互为一段（短于 4 字的段不算）。目标文件相同**不能**当判据——Steam 全家共用 `steam.exe`、UWP 共用 `ApplicationFrameHost.exe`，按文件去重会把除第一张之外的全吞掉，当初连 Steam 本身都进不了页面。
+
 ## 智能分类只有三步
 
 `services/ai/categorize`：本机记忆 → 大模型 → 联网搜索。**分类规则不参与**——那张表只决定桌面上文件挪去哪个文件夹（`services::desktop::match_category`），跟「这台机器装了什么程序」是两回事，所以 `reserved`（规则占用的分类名）那一整套禁令已经拆掉了。

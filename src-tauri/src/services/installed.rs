@@ -203,14 +203,13 @@ pub(crate) fn plan(
     // 已经被注册表那一遍认领走的 .lnk：第二遍不能再把它当新程序
     let mut claimed: HashSet<String> = HashSet::new();
 
-    // 「见过」按两种写法算：卡片存的目标，以及条目的名字
-    //（开始菜单那批存的是解析出的 exe，注册表这条常常是同一个文件）
+    // 「见过」只按名字算（判据见 same_program）：一个启动器养一片程序的情况太多了——Steam 每个游戏的
+    // DisplayIcon 都是 steam.exe，按目标文件去重会把除第一个之外的全都吞掉（Steam 自己就这么没的）
     let mut known: HashSet<String> = HashSet::new();
-    let mut stmt = conn.prepare("SELECT name, target FROM apps")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-    for row in rows.flatten() {
-        known.insert(name_key(&row.0));
-        known.insert(path_key(&row.1));
+    let mut stmt = conn.prepare("SELECT name FROM apps")?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    for name in rows.flatten() {
+        known.insert(name_key(&name));
     }
 
     let mut report = SyncReport {
@@ -238,9 +237,7 @@ pub(crate) fn plan(
             continue;
         }
         let key = name_key(&entry.name);
-        let target_key = path_key(&resolved.target);
-        let seen = (!key.is_empty() && known.contains(&key))
-            || (!target_key.is_empty() && known.contains(&target_key));
+        let seen = same_program(&known, &key);
         if seen {
             report.already += 1;
             continue;
@@ -260,7 +257,6 @@ pub(crate) fn plan(
             )?;
         }
         known.insert(key);
-        known.insert(target_key);
         if resolved.found == Found::Shortcut {
             claimed.insert(path_key(&resolved.icons[0]));
         }
@@ -277,8 +273,7 @@ pub(crate) fn plan(
             continue;
         }
         report.scanned += 1;
-        let target_key = path_key(&sc.target);
-        if known.contains(&sc.key) || known.contains(&target_key) {
+        if same_program(&known, &sc.key) {
             report.already += 1;
             continue;
         }
@@ -304,7 +299,6 @@ pub(crate) fn plan(
             )?;
         }
         known.insert(sc.key.clone());
-        known.insert(target_key);
         known.insert(lnk_key);
         report.inserted += 1;
     }
@@ -618,6 +612,23 @@ fn path_key(p: &str) -> String {
     p.trim().to_lowercase().replace('\\', "/")
 }
 
+/// 「同一个程序」只按名字判：完全一样，或者去掉标点后一个是另一个的一段（注册表名字常多个版本号
+/// 或厂商前缀），太短的段不算——`git` 是 `githubcli` 的一段，但它俩是两个程序。
+/// 目标文件相同**不能**当判据：Steam 全家、Epic、UWP（都走 ApplicationFrameHost.exe）都是一个
+/// 启动器带一片程序，按目标去重会只剩第一张。
+fn same_program(known: &HashSet<String>, key: &str) -> bool {
+    if key.is_empty() {
+        return false;
+    }
+    if known.contains(key) {
+        return true;
+    }
+    key.len() >= 4
+        && known
+            .iter()
+            .any(|k| k.len() >= 4 && (k.contains(key) || key.contains(k.as_str())))
+}
+
 /// 名字比对用的写法：折小写、只留字母数字（中文留着），这样「Foo 1.2 (64-bit)」
 /// 和「Foo1264bit」才算得上同一个东西
 fn name_key(s: &str) -> String {
@@ -928,6 +939,52 @@ mod tests {
         assert!(!program_target(&chm), "帮助文档不该收成应用");
         assert!(!program_target(&htm));
         assert!(!program_target(""));
+    }
+
+    /// 一个启动器养一片程序：Steam 每个游戏的 DisplayIcon 都写 `steam.exe`，按目标文件去重
+    /// 会只留第一张——Steam 自己就是这么从页面上消失的
+    #[test]
+    fn a_shared_launcher_exe_does_not_swallow_the_programs_behind_it() {
+        let dir = sandbox("steam-family");
+        let launcher = touch(&dir, r"Steam\\steam.exe");
+        let entries = vec![
+            Entry {
+                display_icon: launcher.clone(),
+                ..entry("Steam")
+            },
+            Entry {
+                display_icon: launcher.clone(),
+                ..entry("黑神话：悟空")
+            },
+        ];
+        let c = conn();
+
+        let report = plan(&c, &entries, &[], &dir.join("icons"), false).unwrap();
+        assert_eq!(report.inserted, 2, "{report:?}");
+        assert_eq!(report.already, 0, "共用一个 steam.exe 不算重复");
+        assert_eq!(rows(&c).len(), 2);
+    }
+
+    /// 名字太短的不当「一段」看：Git 不该把 GitHub CLI 吞掉
+    #[test]
+    fn a_three_letter_name_is_not_treated_as_a_prefix_of_another() {
+        let dir = sandbox("git-vs-github");
+        let git = touch(&dir, r"Git\\git.exe");
+        let gh = touch(&dir, r"GitHub\\gh.exe");
+        let entries = vec![
+            Entry {
+                display_icon: git,
+                ..entry("Git")
+            },
+            Entry {
+                display_icon: gh,
+                ..entry("GitHub CLI")
+            },
+        ];
+        let c = conn();
+
+        let report = plan(&c, &entries, &[], &dir.join("icons"), false).unwrap();
+        assert_eq!(report.inserted, 2, "{report:?}");
     }
 
     #[test]
@@ -1474,7 +1531,7 @@ mod tests {
 
         // 收进来的名字整片打出来：过滤这条最怕的是切错东西，光看个数看不出来
         let examples: Vec<(String, String, Option<String>)> = c
-            .prepare("SELECT name, target, description FROM apps ORDER BY name LIMIT 80")
+            .prepare("SELECT name, target, description FROM apps ORDER BY name LIMIT 130")
             .unwrap()
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .unwrap()
