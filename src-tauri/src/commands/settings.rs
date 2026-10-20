@@ -188,7 +188,21 @@ mod tests {
         assert_eq!(planned_key(Some("")), "");
         assert_eq!(planned_key(Some("   ")), "", "一片空白也算不要");
         assert_eq!(planned_key(Some("Ctrl+Alt+W")), "Ctrl+Alt+W");
-        // 库里留着的旧写法（老录制器存过 e.code 原样）照原样带出去，让界面看得见它
-        assert_eq!(planned_key(Some("Ctrl+Alt+KeyW")), "Ctrl+Alt+KeyW");
+    }
+
+    /// 快捷键写法必须**修饰键在前**：这是底层那个 parser 定的规矩（`Space+Alt` 判 InvalidFormat，
+    /// 因为主键之后不许再有 token）。但字母的两种拼法 `W` 和 `KeyW` 都认——同一个键，别当成坏数据。
+    #[test]
+    fn accelerators_take_modifiers_first_but_both_letter_spellings() {
+        use std::str::FromStr;
+        use tauri_plugin_global_shortcut::Shortcut;
+
+        assert!(Shortcut::from_str("Alt+Space").is_ok());
+        assert!(Shortcut::from_str("Ctrl+Alt+Space").is_ok());
+        assert!(
+            Shortcut::from_str("Ctrl+Alt+KeyW").is_ok(),
+            "`KeyW` 就是 `W` 的另一种拼法，不是坏写法"
+        );
+        assert!(Shortcut::from_str("Space+Alt").is_err(), "主键写在前面不该认");
     }
 }
