@@ -16,3 +16,9 @@ src-tauri/gen/schemas/
 .removed-*/
 .icons-backup-*/
 .archive/
+
+# 小红书配图的本机产物和渲染脚本，不是源码
+.xhs/
+
+# 截图时留下的本机脚本和真库备份，含个人信息，绝不进仓库
+.shots/
