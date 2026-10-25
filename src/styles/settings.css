@@ -43,7 +43,7 @@
 }
 
 .settings-nav-item:hover {
-  background: var(--color-primary-faint);
+  background: var(--color-hover-sunken);
 }
 
 .settings-nav-item:focus-visible {
@@ -53,7 +53,7 @@
 
 .settings-nav-item.on {
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-weight: 600;
 }
 
@@ -120,7 +120,7 @@
   height: 30px;
   border-radius: 9px;
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .settings-line-text {
@@ -226,14 +226,295 @@
   color: var(--color-text-secondary);
 }
 
-/** 深色下主色只有 8% 透明度会糊成一片，图标底改实一点、字色提亮一档才读得清 */
-body.dark .settings-nav-item:hover:not(.on) {
-  background: rgba(255, 255, 255, 0.06);
+/* ---- 外观分组 ---- */
+
+.ap-block {
+  padding: 14px 16px;
 }
 
-body.dark .settings-nav-item.on,
-body.dark .settings-line-icon {
-  background: rgba(79, 107, 237, 0.2);
-  color: #a9b8ff;
+.ap-block + .ap-block {
+  border-top: 1px solid var(--color-border);
+}
+
+.ap-block-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ap-block-tip {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.ap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+}
+
+.ap-cell {
+  position: relative;
+  display: block;
+}
+
+.ap-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-card);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.ap-item:hover {
+  border-color: var(--color-primary);
+}
+
+.ap-item.on {
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+/* 缩略图吃的就是真实渲染路径：变量表贴在 .ap-shot 这一层，里面那些 .ap-* 规则读的还是同一批变量名。
+   所以不会出现「预览图好看、装上不是那样」——预览和界面同源的代价是零。 */
+.ap-shot {
+  display: flex;
+  gap: 3px;
+  height: 74px;
+  padding: 3px;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.ap-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 11px;
+  padding-top: 3px;
+  border-radius: 3px;
+  background: var(--color-sidebar);
+}
+
+.ap-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--color-sidebar-text);
+  opacity: 0.45;
+}
+
+.ap-dot.on {
+  background: var(--color-primary-solid);
+  opacity: 1;
+}
+
+.ap-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ap-bar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 11px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--color-card);
+}
+
+.ap-title {
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-text);
+}
+
+.ap-btn {
+  width: 12px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 2px;
+  background: var(--color-primary-solid);
+}
+
+.ap-body {
+  display: flex;
+  flex: 1;
+  gap: 3px;
+  min-height: 0;
+}
+
+.ap-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 26px;
+}
+
+.ap-row {
+  height: 6px;
+  border-radius: 2px;
+  background: var(--color-text-muted);
+  opacity: 0.35;
+}
+
+.ap-row.on {
+  background: var(--color-primary-soft);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+  opacity: 1;
+}
+
+.ap-cnt {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ap-card {
+  flex: 1;
+  border-radius: calc(var(--radius-card) / 2);
+  background: var(--color-card);
+  box-shadow: var(--shadow-card);
+}
+
+.ap-name {
+  padding: 0 6px 5px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.ap-item.on .ap-name {
+  font-weight: 600;
+  color: var(--color-primary-text);
+}
+
+/* 删除只在悬停/键盘走到时露出来，平时不占卡片的位置 */
+.ap-del {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 1;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-danger-solid);
+  color: var(--color-danger-fg);
+  cursor: pointer;
+}
+
+.ap-cell:hover .ap-del,
+.ap-del:focus-visible {
+  display: flex;
+}
+
+.ap-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.ap-chip {
+  padding: 3px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-card);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ap-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary-text);
+}
+
+.ap-chip.on {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  font-weight: 600;
+  color: var(--color-primary-text);
+}
+
+.ap-accent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ap-accent input[type="color"] {
+  width: 34px;
+  height: var(--p-ctrl-h);
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-card);
+  cursor: pointer;
+}
+
+.ap-hex {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.ap-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ap-check {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.ap-check.ok {
+  background: var(--color-success-soft);
+  color: var(--color-success-text);
+}
+
+.ap-check.bad {
+  background: var(--color-danger-soft);
+  font-weight: 600;
+  color: var(--color-danger-text);
+}
+
+.ap-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ap-import-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 

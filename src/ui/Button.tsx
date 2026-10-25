@@ -16,10 +16,11 @@ interface ButtonProps {
   className?: string;
 }
 
+/** 高度跟着密度档走；内边距和字号是这个控件自己的三档层级，不跟着密度动 */
 const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
-  small: { padding: "4px 10px", fontSize: 12, height: 28 },
-  middle: { padding: "6px 16px", fontSize: 14, height: 34 },
-  large: { padding: "8px 20px", fontSize: 16, height: 42 },
+  small: { padding: "4px 10px", fontSize: 12, height: "calc(var(--p-ctrl-h) - 6px)" },
+  middle: { padding: "6px 16px", fontSize: 14, height: "var(--p-ctrl-h)" },
+  large: { padding: "8px 20px", fontSize: 16, height: "calc(var(--p-ctrl-h) + 8px)" },
 };
 
 export function Button({
@@ -54,13 +55,13 @@ export function Button({
   let typeStyle: React.CSSProperties = {};
   if (type === "primary") {
     typeStyle = {
-      background: danger ? "var(--color-danger)" : "var(--color-primary)",
-      color: "#fff",
+      background: danger ? "var(--color-danger-solid)" : "var(--color-primary-solid)",
+      color: danger ? "var(--color-danger-fg)" : "var(--color-primary-fg)",
     };
   } else if (type === "text" || type === "link") {
     typeStyle = {
       background: "transparent",
-      color: danger ? "var(--color-danger)" : type === "link" ? "var(--color-primary)" : "var(--color-text)",
+      color: danger ? "var(--color-danger-text)" : type === "link" ? "var(--color-primary-text)" : "var(--color-text)",
       padding: size === "small" ? "4px 6px" : "6px 8px",
       height: "auto",
     };

@@ -16,8 +16,8 @@
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 16px 20px;
+  gap: var(--p-gap);
+  padding: var(--p-pad) var(--p-pad-lg);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -33,9 +33,10 @@
 }
 
 /* 工具栏标题跨过分类栏那一列，让紧随其后的控件与程序卡片的左边缘对齐：
-   侧栏宽 200 + 内容栏左内边距 20 − 工具栏左内边距 20 − flex gap 8 */
+   侧栏宽 + 内容栏左内边距 − 工具栏左内边距 − flex gap；后两项同档所以互相抵消，只剩 gap。
+   密度换档时两边一起变，这个等式在任何档位都成立 */
 .toolbar-title-pane {
-  flex: 0 0 calc(var(--side-pane-width) - 8px);
+  flex: 0 0 calc(var(--side-pane-width) - var(--p-gap));
 }
 
 .panes {
@@ -47,7 +48,7 @@
 .side-pane {
   width: var(--side-pane-width);
   flex-shrink: 0;
-  padding: 16px;
+  padding: var(--p-pad);
   border-right: 1px solid var(--color-border);
   overflow: auto;
 }
@@ -55,8 +56,10 @@
 .content-pane {
   flex: 1;
   min-width: 0;
-  padding: 20px;
+  padding: var(--p-pad-lg);
   overflow: auto;
+  /** 背景质感（渐染/细网格/颗粒）落在这一层，卡片压在上面才有前后关系 */
+  background-image: var(--p-texture);
 }
 
 /* ---- 通用小样式 ---- */
@@ -114,7 +117,7 @@
 
 .nav-item.active {
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-weight: 600;
 }
 
@@ -135,7 +138,7 @@
 /* 卡片拖到分类上时的落点：底色和一圈内描边都不占盒外空间，拖动中列表不会跟着抖 */
 .nav-item.drop-target {
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 
@@ -169,7 +172,7 @@
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-control);
   background: var(--color-primary-faint);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .filter-drop:hover {
@@ -198,7 +201,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: var(--p-gap);
   width: 100%;
   height: 110px;
   padding: 14px 8px 10px;
@@ -227,6 +230,8 @@
 
 .select-tick.on {
   border-color: transparent;
-  background: var(--color-primary);
+  background: var(--color-primary-solid);
+  /** 勾是 SVG 的 currentColor，所以这里给字色就等于给勾色 */
+  color: var(--color-primary-fg);
 }
 

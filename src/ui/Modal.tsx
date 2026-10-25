@@ -7,7 +7,7 @@ import { message } from "./Message";
 const overlayStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.45)",
+  background: "var(--color-overlay)",
 };
 
 const panelStyle: React.CSSProperties = {
@@ -17,7 +17,7 @@ const panelStyle: React.CSSProperties = {
   transform: "translate(-50%, -50%)",
   background: "var(--color-card)",
   borderRadius: "var(--radius-card)",
-  boxShadow: "0 8px 32px rgba(0,0,0,0.16)",
+  boxShadow: "var(--shadow-modal)",
 };
 
 interface ModalProps {

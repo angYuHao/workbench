@@ -1,13 +1,15 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useMemo, useState } from "react";
 
-function stringToColor(str: string): string {
+/** 读不到图标文件时的替补色块。色相从名字哈希，深浅是配好的一对：
+    以前是固定中亮度底 + 白字，哈希到黄绿色那一档时白字几乎看不见 */
+function stringToTile(str: string): { bg: string; fg: string } {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
   const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 55%, 52%)`;
+  return { bg: `hsl(${hue}, 62%, 90%)`, fg: `hsl(${hue}, 58%, 25%)` };
 }
 
 interface Props {
@@ -19,7 +21,7 @@ interface Props {
 export default function IconWithFallback({ name, iconPath, size = 48 }: Props) {
   const [error, setError] = useState(false);
   const initial = useMemo(() => name.trim().charAt(0).toUpperCase() || "?", [name]);
-  const bg = useMemo(() => stringToColor(name), [name]);
+  const tile = useMemo(() => stringToTile(name), [name]);
 
   if (!iconPath || error) {
     return (
@@ -28,8 +30,8 @@ export default function IconWithFallback({ name, iconPath, size = 48 }: Props) {
           width: size,
           height: size,
           borderRadius: "var(--radius-icon)",
-          background: bg,
-          color: "#fff",
+          background: tile.bg,
+          color: tile.fg,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

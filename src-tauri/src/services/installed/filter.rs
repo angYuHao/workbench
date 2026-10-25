@@ -1,7 +1,7 @@
 //! 判收不收：一次同步里两道闸——手动名单（设置 → 应用过滤）和「系统应用」总开关，
-//! 再加一条按名字的判重 [same_program]。名单的增删改查也在这儿，改的就是这张名单。
+//! 再加一条按名字的判重 [find_program]。名单的增删改查也在这儿，改的就是这张名单。
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use rusqlite::{params, Connection};
 
@@ -120,17 +120,23 @@ pub(crate) fn system_root() -> String {
 /// 或厂商前缀），太短的段不算——`git` 是 `githubcli` 的一段，但它俩是两个程序。
 /// 目标文件相同**不能**当判据：Steam 全家、Epic、UWP（都走 ApplicationFrameHost.exe）都是一个
 /// 启动器带一片程序，按目标去重会只剩第一张。
-pub(crate) fn same_program(known: &HashSet<String>, key: &str) -> bool {
+///
+/// 判据只这一份，而且返回的是那一行本身：「认出库里已有」和「已有卡片要顺手把路径图标追回来」
+/// 用的是同一个问题，写成两个函数迟早漂开——图标不更新就是这么来的。
+pub(crate) fn find_program<'k, T>(known: &'k HashMap<String, T>, key: &str) -> Option<&'k T> {
     if key.is_empty() {
-        return false;
+        return None;
     }
-    if known.contains(key) {
-        return true;
+    if let Some(hit) = known.get(key) {
+        return Some(hit);
     }
-    key.len() >= 4
-        && known
-            .iter()
-            .any(|k| k.len() >= 4 && (k.contains(key) || key.contains(k.as_str())))
+    if key.len() < 4 {
+        return None;
+    }
+    known
+        .iter()
+        .find(|(k, _)| k.len() >= 4 && (k.contains(key) || key.contains(k.as_str())))
+        .map(|(_, row)| row)
 }
 /// 过滤名单：一条模式就是个小写子串，比对名字和路径两种写法
 pub fn get_app_filters(conn: &Connection) -> AppResult<Vec<String>> {

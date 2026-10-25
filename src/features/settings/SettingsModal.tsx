@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Ban, Bot, DatabaseBackup, Filter, Rocket, Search } from "lucide-react";
+import { Ban, Bot, DatabaseBackup, Filter, Palette, Rocket, Search } from "lucide-react";
 import { useSettingsStore } from "../../stores/settings";
 import { deleteAiModel, getAiModels, probeAiModel, openAiLog, readAiLog } from "../../api/aiModels";
 import { clearAiMemory, getAiMemory } from "../../api/smart";
@@ -11,6 +11,7 @@ import {
   removeBookmarkBlacklist,
 } from "../../api/bookmarks";
 import { Input, Modal, ModalConfirm, message } from "../../ui";
+import AppearanceSection from "./AppearanceSection";
 import BlacklistSection from "./BlacklistSection";
 import AppFilterSection from "./AppFilterSection";
 import DataSection from "./DataSection";
@@ -44,6 +45,14 @@ const SECTIONS = [
     desc: "命中的网址不在网页管理里显示，导入收藏夹时也会跳过",
     icon: Ban,
     words: "黑名单 屏蔽 拉黑 域名 网址 black list",
+  },
+  {
+    key: "appearance",
+    group: "通用",
+    label: "外观",
+    desc: "换风格、调主色和密度，点一下当场生效；存下来的风格还能导出成 JSON 发给别人",
+    icon: Palette,
+    words: "外观 主题 风格 颜色 配色 深色 浅色 主色 圆角 密度 字号 阴影 导轨 背景 质感 theme style color accent dark light radius density",
   },
   {
     key: "startup",
@@ -260,6 +269,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
                     onClearPageCache={handleClearPageCache}
                   />
                 )}
+                {active.key === "appearance" && <AppearanceSection />}
                 {active.key === "appFilter" && <AppFilterSection />}
                 {active.key === "blacklist" && (
                   <BlacklistSection

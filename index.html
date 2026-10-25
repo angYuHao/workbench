@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>个人工作台</title>
+    <!-- 界面变量的同步重放，必须早于首帧；写成内联会被 CSP 拦（见 public/appearance.js 顶上那段注释） -->
+    <script src="/appearance.js"></script>
   </head>
   <body>
     <div id="root"></div>

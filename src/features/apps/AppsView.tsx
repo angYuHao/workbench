@@ -91,9 +91,16 @@ export default function AppsView() {
       const r = await syncInstalledApps();
       await loadApps();
       const skipped = r.filtered > 0 ? `，按过滤名单跳过 ${r.filtered} 个` : "";
+      const refreshed = r.updated > 0 ? `，${r.updated} 个的启动路径或图标追回了更新` : "";
+      const cleaned =
+        r.removed > 0
+          ? `，清掉 ${r.removed} 个本机已经没有的（${r.removedNames.slice(0, 3).join("、")}${r.removed > 3 ? " 等" : ""}）`
+          : "";
       const lost = r.unresolved > 0 ? `，${r.unresolved} 个认不出要打开什么` : "";
-      if (r.inserted > 0) message.success(`从注册表和开始菜单新收录 ${r.inserted} 个程序${skipped}${lost}`);
-      else if (manual) message.info(`注册表和开始菜单都没有新程序，当前 ${r.total} 个${skipped}${lost}`);
+      if (r.inserted > 0)
+        message.success(`从注册表和开始菜单新收录 ${r.inserted} 个程序${skipped}${refreshed}${cleaned}${lost}`);
+      else if (manual)
+        message.info(`注册表和开始菜单都没有新程序，当前 ${r.total} 个${refreshed}${cleaned}${skipped}${lost}`);
     } catch (e) {
       message.error(String(e));
     } finally {

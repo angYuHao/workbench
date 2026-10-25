@@ -40,7 +40,7 @@ npx tauri build -d --no-bundle     # 产物在 src-tauri\target\debug\ 下
 
 ## 发布
 
-推一个 `v*` 的 tag 就触发 [.github/workflows/release.yml](.github/workflows/release.yml)：runner 上装依赖、`cargo test` + `cargo clippy`、然后 `tauri build`（`beforeBuildCommand` 里带着 `tsc && vite build`），最后建 Release 并带上现场算的 SHA-256。上面那四道门在发版前是齐的。tag 名字里带横杠的（`v1.0.0-rc1` 这种）只跑不发布，用来试。
+推一个 `v*` 的 tag 就触发 [.github/workflows/release.yml](.github/workflows/release.yml)：runner 上装依赖、`cargo test` + `cargo clippy`、颜色守卫、然后 `tauri build`（`beforeBuildCommand` 里带着 `tsc && vite build`），最后建 Release 并带上现场算的 SHA-256。上面那五道门在发版前是齐的。tag 名字里带横杠的（`v1.0.0-rc1` 这种）只跑不发布，用来试。
 
 上传前工作流会把安装包名开头的中文产品名换成 `workbench`：**GitHub 会抹掉资产名里的非 ASCII 字符**（`个人工作台_1.0.1_x64-setup.exe` 传上去只剩 `_1.0.1_x64-setup.exe`），不改名的话 Release 正文里的文件名和实际下载到的对不上。`bundle.artifactName` 这个配置键在 CLI 2.12.1 里还没有，所以只能在上传前动手。
 
@@ -49,9 +49,12 @@ npx tauri build -d --no-bundle     # 产物在 src-tauri\target\debug\ 下
 ```bash
 cd src-tauri && cargo test --offline && cargo clippy --offline --all-targets
 npx tsc --noEmit --noUnusedLocals --noUnusedParameters && npx vite build
+npm run lint:colors
 ```
 
-`vite build` **不做类型检查**，别把它的成功当类型过关。这四道门只保证能编译、单测过，**不代表界面行为对**：拖拽、双击、弹窗这三类要在 `npm run tauri dev` 的窗口里点一遍，WebView2 和浏览器对 HTML5 拖放的行为不一样。
+`vite build` **不做类型检查**，别把它的成功当类型过关。`lint:colors` 查两件事：token 层之外不许出现裸色值，界面里引用的变量名必须是派生层真的发出来的那些（写成 `--color-text-muta` 不会报错，只会静悄悄变成无色）。豁免名单只有四个文件——`styles/color.ts`、`styles/seeds.ts`、`styles/derive.ts`、`styles/tokens.css`，它们是颜色的**来源**；别处的颜色都是抄写，抄一份就多一处会漏网的地方。
+
+这五道门只保证能编译、单测过，**不代表界面行为对**：拖拽、双击、弹窗这三类要在 `npm run tauri dev` 的窗口里点一遍，WebView2 和浏览器对 HTML5 拖放的行为不一样。改过外观还要专门看两件事：设置里「外观」那页点一圈预设当场有没有变、代码预览在高对比风格下读不读得清。
 
 动过命令层还要重新数那个不变量——`#[tauri::command]` 定义数 == `generate_handler!` 注册数，漏登记编译不报错，运行时才「command not found」：
 
@@ -78,6 +81,7 @@ src-tauri/           后端（见 src-tauri/README.md）
   src/services/      业务逻辑，测试就写在文件尾（installed/ desktop/ ai/categorize/ ai/models/ 这四个域已拆成子目录）
   src/models/        跨层数据结构，按域分文件
   src/db/schema.sql  唯一的建表来源
+  src/drawer.rs      顶边抽屉：轮询鼠标位置的后台线程 + 窗口形状切换（设置里那条开关）
   src/paths.rs       %APPDATA%\workbench 这一个数据目录：库、图标缓存、ai.log 都从它取
   src/win/           手写 Win32：DPAPI、CNG、shell、图标、快捷方式、抓屏
 ```

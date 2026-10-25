@@ -21,10 +21,11 @@ interface InputProps {
   maxLength?: number;
 }
 
+/** 高度和 Button 同一口径：跟着密度档走，横向内边距与字号是这个控件自己的层级 */
 const inputSizes = {
-  small: { paddingX: 8, fontSize: 12, height: 28 },
-  middle: { paddingX: 10, fontSize: 14, height: 34 },
-  large: { paddingX: 12, fontSize: 16, height: 42 },
+  small: { paddingX: 8, fontSize: 12, height: "calc(var(--p-ctrl-h) - 6px)" },
+  middle: { paddingX: 10, fontSize: 14, height: "var(--p-ctrl-h)" },
+  large: { paddingX: 12, fontSize: 16, height: "calc(var(--p-ctrl-h) + 8px)" },
 };
 
 export function Input({

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppWindow, FolderKanban, Globe, Moon, Puzzle, Settings, Sun } from "lucide-react";
-import { useSettingsStore } from "../stores/settings";
+import { useAppearanceStore } from "../stores/appearance";
+import { resolveMode } from "../styles/apply";
 import { Tooltip, pressable } from "../ui";
 import SettingsModal from "../features/settings/SettingsModal";
 // 侧栏顶部就用产品图标本身，不再另画一个字母标记：换图标时只换一处
@@ -15,8 +16,11 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar() {
-  const theme = useSettingsStore((s) => s.theme);
-  const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+  // 侧栏这颗只切深浅，不动风格本身；挂着「跟随系统」时按一下就把那档定成具体一边
+  const mode = useAppearanceStore((s) => s.overrides.mode ?? s.userStyles.find((u) => u.id === s.styleId)?.seed.mode ?? "light");
+  const setMode = useAppearanceStore((s) => s.setMode);
+  const dark = resolveMode(mode) === "dark";
+  const flip = () => void setMode(dark ? "light" : "dark");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -43,14 +47,9 @@ export default function Sidebar() {
       })}
 
       <div className="sidebar-footer">
-        <Tooltip title={theme === "dark" ? "切换到浅色" : "切换到深色"} placement="right">
-          <div
-            className="nav-button"
-            aria-label={theme === "dark" ? "切换到浅色" : "切换到深色"}
-            onClick={toggleTheme}
-            {...pressable(toggleTheme)}
-          >
-            {theme === "dark" ? <Sun size={20} strokeWidth={1.5} /> : <Moon size={20} strokeWidth={1.5} />}
+        <Tooltip title={dark ? "切换到浅色" : "切换到深色"} placement="right">
+          <div className="nav-button" aria-label={dark ? "切换到浅色" : "切换到深色"} onClick={flip} {...pressable(flip)}>
+            {dark ? <Sun size={20} strokeWidth={1.5} /> : <Moon size={20} strokeWidth={1.5} />}
           </div>
         </Tooltip>
         <Tooltip title="设置" placement="right">

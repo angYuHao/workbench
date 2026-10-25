@@ -25,8 +25,12 @@ jobs:
       - name: 装前端依赖
         run: npm ci
 
-      # CONTRIBUTING 那四道门，tauri build 只自带 tsc + vite build 这两道（beforeBuildCommand）。
-      # 单测和 clippy 在这儿补上：否则 Rust 侧的逻辑回归能一路打进 Release。
+      # 抄进组件里的裸色值、以及引用了没人发的变量名，这两类都不会让构建报错，只能在这儿拦
+      - name: 颜色守卫
+        run: npm run lint:colors
+
+      # CONTRIBUTING 那五道门，tauri build 只自带 tsc + vite build 这两道（beforeBuildCommand）。
+      # 单测、clippy 和颜色守卫在这儿补上：否则 Rust 侧的逻辑回归、以及抄进组件里的裸色值能一路打进 Release。
       # 不加 `-D warnings`：runner 上的工具链比本机新，新 clippy 规则只会让发版莫名变红。
       - name: 后端单测与 clippy
         shell: bash

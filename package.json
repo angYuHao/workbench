@@ -1,13 +1,14 @@
 {
   "name": "workbench",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "description": "个人工作台 - 桌面整理 / 网址管理 / 文件管理",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "lint:colors": "node scripts/check-colors.mjs src",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -167,7 +167,7 @@ export function Select({
               background: "var(--color-card)",
               border: "1px solid var(--color-border)",
               borderRadius: "var(--radius-control)",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              boxShadow: "var(--shadow-floating)",
               maxHeight: dropPos.maxHeight,
               padding: 4,
             }}

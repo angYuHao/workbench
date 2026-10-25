@@ -3,11 +3,12 @@
 //! 挡掉和收进来两张名单都会整片打出来。
 
 use rusqlite::{params, Connection};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::services::desktop::get_icon_dir;
 
-use super::filter::{hits, is_system, read_filters, system_root, SYSTEM_SWITCH};
+use super::filter::{find_program, hits, is_system, read_filters, system_root, SYSTEM_SWITCH};
 use super::scan::{read_entries, shortcut_index};
 use super::store::plan;
 use super::target::{
@@ -207,6 +208,186 @@ fn a_shortcut_the_registry_row_already_uses_is_not_collected_again() {
     let report = plan(&c, &[entry("Loomy")], &scs, &dir.join("icons"), false).unwrap();
     assert_eq!(report.inserted, 1, "{report:?}");
     assert_eq!(rows(&c), vec!["Loomy|registry|"], "同一个程序不该收两张");
+}
+
+/// 同一家厂商的兄弟产品：`Qoder CN 0.4.11` 不许因为「qoder 是 qodercn0411 的一段」而
+/// 匹配到国际版的快捷方式上——那张卡点开会打开另一个产品。索引里故意把短名字排在前面，
+/// 一旦匹配掉到「互相包含取最短」那一档就会红。
+#[test]
+fn a_regional_sibling_finds_its_own_shortcut_not_the_shorter_namesake() {
+    let dir = sandbox("sibling-lnk");
+    let international = touch(&dir, "Qoder.exe");
+    let cn = touch(&dir, "Qoder CN.exe");
+    let scs = [
+        Shortcut {
+            name: "Qoder".to_string(),
+            key: name_key("Qoder"),
+            lnk: international.clone(),
+            target: international.clone(),
+        },
+        Shortcut {
+            name: "Qoder CN".to_string(),
+            key: name_key("Qoder CN"),
+            lnk: cn.clone(),
+            target: cn.clone(),
+        },
+    ];
+    let e = Entry {
+        display_icon: r"F:\Program\Qoder CN\uninstallerIcon.ico".to_string(),
+        uninstall: r#""F:\Program\Qoder CN\Uninstall Qoder CN.exe" /currentuser"#.to_string(),
+        ..entry("Qoder CN 0.4.11")
+    };
+
+    let r = resolve(&e, &scs);
+    assert_eq!(path_key(&r.target), path_key(&cn), "该认 CN 那个快捷方式：{r:?}");
+}
+
+/// 来源体检：卸载了的、以及被新版本顶掉旧卸载项而留下的孤儿卡片，同步时要清掉；
+/// 用户自己加的（manual）永远不许动 —— 它没有「来源」可以对。
+#[test]
+fn sweep_clears_orphans_but_never_manual_cards() {
+    let dir = sandbox("sweep");
+    let exe = touch(&dir, r"Still\still.exe");
+    let alive = Entry { display_icon: format!("{exe},0"), ..entry("Still Here") };
+    let c = conn();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('Still Here', ?1, 'registry')", params![exe]).unwrap();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('Gone App', 'x', 'registry')", []).unwrap();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('My Own', 'x', 'manual')", []).unwrap();
+
+    let report = plan(&c, &[alive], &[], &dir.join("icons"), false).unwrap();
+
+    assert_eq!(report.removed, 1, "{report:?}");
+    assert_eq!(report.removed_names, vec!["Gone App".to_string()]);
+    assert_eq!(
+        rows(&c),
+        vec!["My Own|manual|".to_string(), "Still Here|registry|".to_string()],
+        "还在的和手加的都得留着"
+    );
+}
+
+/// 读不到注册表（权限、异常机器）不等于本机什么都没装。这时候最不该做的就是清空整页。
+#[test]
+fn an_empty_registry_read_removes_nothing() {
+    let c = conn();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('Gone App', 'x', 'registry')", []).unwrap();
+
+    let report = plan(&c, &[], &[], &sandbox("sweep-empty").join("icons"), false).unwrap();
+
+    assert_eq!(report.removed, 0, "一条注册表都没读到，不许当成全卸载了");
+    assert_eq!(rows(&c).len(), 1, "卡片得原样留着");
+}
+
+/// 试算（设置页那个「试算一下」）只报数不动手。
+#[test]
+fn a_dry_run_reports_the_sweep_without_doing_it() {
+    let dir = sandbox("sweep-dry");
+    let c = conn();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('Gone App', 'x', 'registry')", []).unwrap();
+
+    let report = plan(&c, &[entry("Something Else")], &[], &dir.join("icons"), true).unwrap();
+
+    assert_eq!(report.removed, 1, "试算也要说清会清掉几条：{report:?}");
+    assert_eq!(rows(&c).len(), 1, "但真一条都不能删");
+}
+
+/// 用户改过名字的卡片：名字对不上注册表了，但路径还是本机在用的那一条 —— 不算孤儿。
+#[test]
+fn a_renamed_card_is_kept_because_its_target_is_still_live() {
+    let dir = sandbox("sweep-renamed");
+    let exe = touch(&dir, r"Tool\tool.exe");
+    let alive = Entry { display_icon: format!("{exe},0"), ..entry("Original Tool") };
+    let c = conn();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('我的工具', ?1, 'registry')", params![exe]).unwrap();
+
+    let report = plan(&c, &[alive], &[], &dir.join("icons"), false).unwrap();
+
+    assert_eq!(report.removed, 0, "只是改了名字，不该被当成卸载：{report:?}");
+    assert_eq!(rows(&c).len(), 2, "原名那条作为新卡片收进来，改名的这张留着");
+}
+#[test]
+fn a_startmenu_card_is_judged_by_whether_its_target_still_exists() {
+    let dir = sandbox("sweep-sm");
+    let lnk = touch(&dir, "Keep.lnk");
+    let c = conn();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('Keep', ?1, 'startmenu')", params![lnk]).unwrap();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('Stale', 'D:\\没有这种盘\\x.lnk', 'startmenu')", []).unwrap();
+
+    let report = plan(&c, &[entry("Unrelated")], &[], &dir.join("icons"), false).unwrap();
+
+    assert_eq!(report.removed, 1, "{report:?}");
+    assert_eq!(report.removed_names, vec!["Stale".to_string()]);
+    assert_eq!(rows(&c), vec!["Keep|startmenu|".to_string()]);
+}
+/// 「卡片指到兄弟产品」这类事第一个该跑它——匹配掉到「互相包含取最短」那一档，
+/// 十有八九是因为本该精确命中的那条压根没进索引。
+#[test]
+#[ignore]
+fn which_shortcuts_make_it_into_the_index() {
+    let scs = shortcut_index(
+        &crate::win::desktop::all_program_menus()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>(),
+    );
+    let needle = std::env::var("WB_PROBE").unwrap_or_else(|_| "qoder".to_string());
+    println!("索引 {} 条，筛「{needle}」：", scs.len());
+    for s in scs.iter().filter(|s| s.key.contains(&needle)) {
+        println!("  key={}\n    lnk={}\n    ->  {}", s.key, s.lnk, s.target);
+    }
+    // 同一把筛子过一遍真机解析：卡片指错东西时，这两段对着看就知道是索引缺了还是匹配挑错了
+    println!("\n注册表里带「{needle}」的条目解析成：");
+    for e in read_entries().into_iter().filter(|e| e.name.to_lowercase().contains(&needle)) {
+        let r = resolve(&e, &scs);
+        println!("  {}\n    [{:?}] -> {}\n    图标候选 {:?}", e.name, r.found, r.target, r.icons);
+    }
+}
+/// 这条是给上一条划边界的——版本号后缀可以削，单独一个标题数字不行。
+#[test]
+fn two_numbered_titles_are_two_programs() {
+    let c = conn();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('Halo 3', 'x', 'registry')", [])
+        .unwrap();
+    let known: HashMap<String, ()> = [(name_key("Halo 3"), ())].into_iter().collect();
+
+    assert!(
+        find_program(&known, &name_key("Halo 4")).is_none(),
+        "Halo 3 和 Halo 4 是两个程序，不能判成同一个"
+    );
+    assert!(
+        find_program(&known, &name_key("Halo 3")).is_some(),
+        "同名同版本才是同一个"
+    );
+}
+/// 这条测的是「已有卡片直接 continue」那个洞——图标不更新就是这么来的。
+/// 这条测的是「已有卡片直接 continue」那个洞——图标不更新就是这么来的。
+#[test]
+fn an_updated_app_follows_the_new_path_without_losing_user_edits() {
+    let dir = sandbox("refreshed-app");
+    let old = touch(&dir, r"Old\app.exe");
+    let new = touch(&dir, r"New\app.exe");
+    let c = conn();
+    c.execute(
+        "INSERT INTO apps (name, alias, target, source, icon_path) VALUES ('Foo', '我的Foo', ?1, 'registry', '旧图标.png')",
+        params![old],
+    )
+    .unwrap();
+
+    let mut e = entry("Foo");
+    e.display_icon = new.clone();
+    let report = plan(&c, &[e], &[], &dir.join("icons"), false).unwrap();
+
+    assert_eq!(report.inserted, 0, "不该再插一张卡片");
+    assert_eq!(report.already, 1, "名字判成同一个程序");
+    assert_eq!(report.updated, 1, "启动路径变了要顺手追回来：{report:?}");
+
+    let (target, alias, icon): (String, String, Option<String>) = c
+        .query_row("SELECT target, alias, icon_path FROM apps", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+        .unwrap();
+    assert_eq!(target, new, "路径该跟着更新");
+    assert_eq!(alias, "我的Foo", "用户改的别名不能动");
+    assert_eq!(icon.as_deref(), Some("旧图标.png"), "这张假 exe 抽不出图标，那就留着旧的而不是清空");
 }
 
 /// 开始菜单里那堆系统自带工具照样归「系统应用」那条管；开关关掉才收

@@ -57,10 +57,16 @@ export interface SyncReport {
   filtered: number;
   /** 库里已经有的 */
   already: number;
+  /** 已有卡片里顺手把启动路径 / 图标追回来的条数（这些同时也被算进 already） */
+  updated: number;
   /** 在注册表里挂着名字、但一条路径都认不出来的：不收卡片 */
   unresolved: number;
   /** 库里现在一共多少张卡片 */
   total: number;
+  /** 这次清掉的「来源已经不在本机」的卡片条数：卸载了，或被新版本的卸载项顶掉了 */
+  removed: number;
+  /** 被清掉的名字，最多 12 个 */
+  removedNames: string[];
   /** 被挡掉的名字，最多 12 个 */
   samples: string[];
 }

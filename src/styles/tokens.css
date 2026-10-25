@@ -1,23 +1,88 @@
+/** 兜底层，不是来源。
+ *
+ *  界面的颜色只有两个地方能出现：styles/derive.ts 里算出来，和这里抄一份它的输出当兜底。
+ *  这里存在的唯一理由是「JS 还没跑的那几毫秒也得有东西可画」，所以值必须等于默认风格
+ *  （seeds.ts 里 DEFAULT_STYLE_ID）浅色那一半的派生结果 —— 用 check 脚本从 derive 里生成，
+ *  别手改；改种子请改 seeds.ts 然后重新生成这一段。
+ *
+ *  运行时 styles/apply.ts 会把整表覆盖到 <html> 的 style 上，所以这里的值正常情况下不会露出来。 */
 :root {
-  --color-primary: #4f6bed;
-  --color-primary-soft: rgba(79, 107, 237, 0.08);
-  --color-primary-faint: rgba(79, 107, 237, 0.06);
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
-  --color-danger: #ef4444;
-  --color-bg: #f5f7fa;
+  --color-primary: #5b7cff;
+  --color-primary-solid: #4d69d8;
+  --color-primary-solid-hover: #455fc2;
+  --color-primary-hover: #5270e6;
+  --color-primary-active: #4b66d1;
+  --color-primary-soft: #eff2ff;
+  --color-primary-faint: #f6f8ff;
+  --color-primary-fg: #ffffff;
+  --color-primary-text: #4d69d8;
+  --color-primary-ring: rgba(91, 124, 255, 0.32);
+  --color-bg: #fafbff;
   --color-card: #ffffff;
-  --color-sidebar: #1e293b;
-  --color-text: #1f2937;
-  --color-text-secondary: #6b7280;
-  --color-sidebar-text: #cbd5e1;
-  --color-border: #e5e7eb;
-  --color-row-stripe: rgba(0, 0, 0, 0.02);
-  --radius-card: 12px;
-  --radius-control: 8px;
-  --radius-icon: 6px;
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --color-card-raised: #ffffff;
+  --color-sunken: #f1f2f6;
+  --color-text: #2b3352;
+  --color-text-secondary: #808597;
+  --color-text-muted: #a0a3b1;
+  --color-border: #cad2ee;
+  --color-border-strong: #b9bfd8;
+  --color-row-stripe: rgba(137, 147, 186, 0.03);
+  --color-hover-sunken: rgba(137, 147, 186, 0.055);
+  --color-sidebar: #e1e7ff;
+  --color-sidebar-text: #425ab9;
+  --color-sidebar-hover: rgba(91, 124, 255, 0.14);
+  --color-info: #2563eb;
+  --color-info-soft: #ebf1fd;
+  --color-info-edge: #c6d6fa;
+  --color-info-text: #2563eb;
+  --color-info-solid: #2563eb;
+  --color-info-fg: #ffffff;
+  --color-success: #16a34a;
+  --color-success-soft: #eaf7ef;
+  --color-success-edge: #c2e7d0;
+  --color-success-text: #107536;
+  --color-success-solid: #107536;
+  --color-success-fg: #ffffff;
+  --color-warning: #d97706;
+  --color-warning-soft: #fcf3e9;
+  --color-warning-edge: #f5dcbe;
+  --color-warning-text: #9d5604;
+  --color-warning-solid: #9d5604;
+  --color-warning-fg: #ffffff;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fcebeb;
+  --color-danger-edge: #f6c7c7;
+  --color-danger-text: #cf2424;
+  --color-danger-solid: #dc2626;
+  --color-danger-fg: #ffffff;
+  --color-overlay: rgba(0, 0, 0, 0.45);
+  --color-tooltip-bg: #0d1424;
+  --color-tooltip-fg: #ffffff;
+  --color-paper: #ffffff;
+  --color-scrollbar: #d5d6dc;
+  --shadow-card: 0 1px 2px rgba(79, 108, 221, 0.036), 0 3px 17px rgba(79, 108, 221, 0.047);
+  --shadow-card-hover: 0 2px 4px rgba(79, 108, 221, 0.043), 0 8px 27px rgba(79, 108, 221, 0.072);
+  --shadow-floating: 0 4px 19px rgba(79, 108, 221, 0.115);
+  --shadow-modal: 0 8px 39px rgba(79, 108, 221, 0.151);
+  --shadow-control: 0 1px 3px rgba(79, 108, 221, 0.086);
+  --radius-card: 18px;
+  --radius-control: 14px;
+  --radius-icon: 9px;
+  --p-gap: 8px;
+  --p-pad: 16px;
+  --p-pad-lg: 20px;
+  --p-ctrl-h: 34px;
+  --p-font: 14px;
+  --p-texture: linear-gradient(160deg, rgba(91, 124, 255, 0.07), transparent 55%);
+  --color-code-bg: #f8f8f9;
+  --color-code-fg: #2b3352;
+  --color-code-comment: #a6a9b6;
+  --color-code-keyword: #8250df;
+  --color-code-string: #0a7d33;
+  --color-code-number: #9a5700;
+  --color-code-title: #1d4ed8;
+  --color-code-builtin: #0e7490;
+  --color-code-name: #b91c1c;
   --side-pane-width: 200px;
 }
 
@@ -37,12 +102,11 @@ body {
   font-family: "Segoe UI", "微软雅黑", -apple-system, "PingFang SC", sans-serif;
   color: var(--color-text);
   background: var(--color-bg);
-  font-size: 14px;
+  font-size: var(--p-font);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
 a {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
-

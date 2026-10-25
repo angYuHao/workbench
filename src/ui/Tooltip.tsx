@@ -32,8 +32,8 @@ export function Tooltip({ title, placement = "top", children }: TooltipProps) {
           style={{
             position: "absolute",
             zIndex: 999,
-            background: "rgba(0,0,0,0.8)",
-            color: "#fff",
+            background: "var(--color-tooltip-bg)",
+            color: "var(--color-tooltip-fg)",
             padding: "4px 8px",
             borderRadius: 4,
             fontSize: 12,

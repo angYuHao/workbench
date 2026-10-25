@@ -12,7 +12,7 @@
 2. `src/lib.rs` 的 `tauri::generate_handler![...]` 登记一条
 3. 前端 `src/api/<域>.ts` 里 `invoke("命令名", { ... })`
 
-**漏第 2 步编译不报错**，运行时才「command not found」。当前基线：`#[tauri::command]` 定义数 == 注册数 == 69（2026-10-20 拆掉唤醒快捷键那三条命令之后），前端 `invoke` 的字符串全部落在这个集合里。改完命令层就重新数一遍这两个数：
+**漏第 2 步编译不报错**，运行时才「command not found」。当前基线：`#[tauri::command]` 定义数 == 注册数 == 70（2026-10-21 加顶边抽屉那条 `set_edge_drawer`；上一条是 2026-10-20 拆掉唤醒快捷键那三条命令后落在 69），前端 `invoke` 的字符串全部落在这个集合里。改完命令层就重新数一遍这两个数：
 
 ```bash
 grep -rc '#\[tauri::command\]' src/commands/*.rs   # 求和
@@ -72,6 +72,16 @@ grep -c 'commands::' src/lib.rs
 - 每条 directive 都有具体东西依赖：`convertFileSrc` 在 Windows 上出的是 `http://asset.localhost/<编码路径>`，所以 `img-src`/`frame-src`/`connect-src` 三个都要同时写 `asset:` 和 `http://asset.localhost`（前者给别的平台，后者给本机 WebView2）；`style-src 'unsafe-inline'` 是 React 那一大堆内联 `style=` 必需的，去掉就整体没样式；`connect-src ipc: http://ipc.localhost` 照 Tauri 配置文档的示例留着。书签页的 favicon 走 `https://www.google.com/s2/favicons`，是唯一一个远程图片源。
 - **asset scope 静态是空的**，运行时按目录授权：`services::files::preview_roots()` = 两个桌面根（`win::desktop::all_desktops()`）+ 图标缓存目录 + 每个受管文件夹，启动时在 `lib.rs` 的 setup 里逐条 `allow_directory(root, true)`，`add_managed_folder` 当场补一条。移除受管文件夹**撤不回**：scope 只有 `allow_*` 和会永久压住后续允许的 `forbid_*`，所以只摘监视器，预览权限等下次启动自然消失。
 - 预览不受信文件靠三层叠加：`rehype-sanitize`（md 里的原始 HTML）、iframe `sandbox="allow-same-origin"`（.html，不放行脚本）、上面那份 CSP（内联脚本和远程脚本都执行不了）。
+
+## 顶边抽屉（平时藏着，鼠标顶到屏幕上沿出来）
+
+设置里那条「顶边唤出抽屉」存的是 `settings` 里的 `edge_drawer`，**没写过就算开**。开关两边都由 `commands::settings::set_edge_drawer` 同时落库和当场改窗口形状，所以界面不会和窗口状态不同步（和 `set_close_to_tray` 同一个路子）。
+
+`tauri.conf.json` 里 `windows[0]` 存的是**开着的形状**：`visible: false` + `decorations: false` + `alwaysOnTop: true`——因为默认是开，这条路一次都不用改窗口样式；只有关掉时才在运行时 `set_decorations(true)` + 取消置顶 + `center()` 回到带标题栏的居中窗口。第一次跑（库里压根没 `edge_drawer` 这条）会先显示一次，不然装完点开啥也看不见。
+
+`drawer.rs` 里那 150ms 一次的轮询用 `GetCursorPos`（`Win32_UI_WindowsAndMessaging`，为「鼠标键还按着」那条另开了 `Win32_UI_Input_KeyboardAndMouse`），三条保护都写在文件头的注释里：光标没进过窗口不算「离开」（托盘唤回不会一闪就没）、按住任何鼠标键期间不收（拖卡片到分类、拖桌面文件进来不能被废掉）、有全屏程序盖住整块显示器在前台时不弹出（视频、游戏、放映）。抽屉高度取 640 逻辑像素、屏幕不够高让到工作区一半，宽=那块屏工作区的宽，位置贴工作区上沿。
+
+窗口 hide/show 全在 Rust 侧：capabilities 里只有 `core:window:default`，JS 侧根本调不动（`window.hide()` 会被拒）。托盘那条路留着当兜底——抽屉模式下窗口没有标题栏，「退出」只剩托盘菜单。
 
 ## 密钥与隐私边界
 

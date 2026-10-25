@@ -36,6 +36,23 @@ pub fn set_close_to_tray(
     Ok(())
 }
 
+/// 顶边信息条：存设置 + 当场生效（关掉时把那条收起来）。抽屉拆成独立窗口之后，
+/// 这里不再动主窗口的边框和置顶；界面和窗口状态不会不同步——和 `set_close_to_tray` 是同一个路子
+#[tauri::command]
+pub fn set_edge_drawer(
+    state: State<AppState>,
+    app: tauri::AppHandle,
+    on: bool,
+) -> Result<(), String> {
+    {
+        let conn = state.conn();
+        crate::services::settings::set_setting(&conn, "edge_drawer", if on { "1" } else { "0" })
+            .map_err(|e| e.to_string())?;
+    }
+    crate::drawer::apply(&app, on);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn export_db(state: State<AppState>, dest: String) -> Result<(), String> {
     let conn = state.conn();

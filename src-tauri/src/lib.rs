@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod drawer;
 mod error;
 mod filewatcher;
 mod models;
@@ -76,6 +77,20 @@ pub fn run() {
                 tray::install(app.handle())?;
             }
 
+            // 顶边抽屉：没写过这个键就算开。第一次跑（库里压根没这条）先把窗口显示一次，
+            // 不然装完点开啥也没看见，只会以为程序没起来
+            let conn = app_state.conn();
+            let edge = services::settings::get_setting(&conn, "edge_drawer")
+                .ok()
+                .flatten();
+            drop(conn);
+            let drawer_on = edge.as_deref() != Some("0");
+            drawer::apply(app.handle(), drawer_on);
+            if edge.is_none() {
+                drawer::reveal_once(app.handle());
+            }
+            drawer::start(app.handle());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -134,6 +149,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::set_setting,
             commands::settings::set_close_to_tray,
+            commands::settings::set_edge_drawer,
             commands::settings::export_db,
             commands::settings::restore_db,
             commands::categorize::smart_categorize,
@@ -147,6 +163,7 @@ pub fn run() {
             commands::totp::totp_secret,
             commands::totp::export_totp_backup,
             commands::totp::import_totp_backup,
+            commands::notify::broadcast_change,
             commands::screen::capture_screen
         ])
         .run(context)

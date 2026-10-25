@@ -57,7 +57,7 @@ export function Dropdown({ menu, children }: DropdownProps) {
             background: "var(--color-card)",
             border: "1px solid var(--color-border)",
             borderRadius: "var(--radius-control)",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+            boxShadow: "var(--shadow-floating)",
             padding: 4,
             minWidth: 120,
           }}

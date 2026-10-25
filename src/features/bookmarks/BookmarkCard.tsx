@@ -1,7 +1,7 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { ITEM_MIME } from "../../shared/dragItem";
 import { Space, pressable } from "../../ui";
-import Favicon from "./Favicon";
+import Favicon from "../../shared/Favicon";
 import SelectTick from "../../shared/SelectTick";
 import type { Bookmark } from "../../types";
 

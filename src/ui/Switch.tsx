@@ -22,7 +22,7 @@ export function Switch({ checked, onChange, size = "default", disabled }: Switch
         width: w,
         height: h,
         borderRadius: h / 2,
-        background: checked ? "var(--color-primary)" : "var(--color-border)",
+        background: checked ? "var(--color-primary-solid)" : "var(--color-border)",
         position: "relative",
         cursor: disabled ? "not-allowed" : "pointer",
         transition: "background 0.2s ease",
@@ -35,12 +35,12 @@ export function Switch({ checked, onChange, size = "default", disabled }: Switch
           width: knob,
           height: knob,
           borderRadius: "50%",
-          background: "#fff",
+          background: "var(--color-primary-fg)",
           position: "absolute",
           top: 2,
           left: checked ? w - knob - 2 : 2,
           transition: "left 0.2s ease",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+          boxShadow: "var(--shadow-control)",
         }}
       />
     </div>

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { write } from "./notify";
 import type { TotpAccount, TotpAccountInput, TotpImportReport } from "../types";
 
 export function getTotpAccounts() {
@@ -6,11 +7,11 @@ export function getTotpAccounts() {
 }
 
 export function saveTotpAccount(account: TotpAccountInput) {
-  return invoke<TotpAccount>("save_totp_account", { account });
+  return write<TotpAccount>("save_totp_account", "totp", { account });
 }
 
 export function deleteTotpAccount(id: number) {
-  return invoke<void>("delete_totp_account", { id });
+  return write<void>("delete_totp_account", "totp", { id });
 }
 
 export function totpCode(id: number) {
@@ -21,11 +22,11 @@ export function totpSecret(id: number) {
   return invoke<string>("totp_secret", { id });
 }
 
-/// 口令加密导出，返回写入文件的账户条数
+/// 口令加密导出，返回写入文件的账户条数。只往磁盘写，没动库，所以不广播
 export function exportTotpBackup(dest: string, passphrase: string) {
   return invoke<number>("export_totp_backup", { dest, passphrase });
 }
 
 export function importTotpBackup(src: string, passphrase: string) {
-  return invoke<TotpImportReport>("import_totp_backup", { src, passphrase });
+  return write<TotpImportReport>("import_totp_backup", "totp", { src, passphrase });
 }

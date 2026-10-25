@@ -4,7 +4,7 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--color-scrollbar);
   border-radius: 4px;
 }
 
@@ -29,85 +29,69 @@
   }
 }
 
-body.dark {
-  --color-bg: #111827;
-  --color-card: #1f2937;
-  --color-sidebar: #0b1220;
-  --color-text: #e5e7eb;
-  --color-text-secondary: #9ca3af;
-  --color-sidebar-text: #94a3b8;
-  --color-border: #374151;
-  --color-row-stripe: rgba(255, 255, 255, 0.03);
+/** 代码高亮不再引 highlight.js 的成品主题：原来只有浅色那份，深色靠手搓 66 行覆盖，
+ *  多一个风格就多 66 行。现在这些颜色全部来自派生层，换风格换深浅都跟着一起走。 */
+.hljs {
+  color: var(--color-code-fg);
 }
 
-body.dark ::-webkit-scrollbar-thumb {
-  background: #4b5563;
+.text-view .hljs {
+  background: var(--color-code-bg);
 }
 
-/* highlight.js 只引了浅色版 github.css，深色主题下这些 token 会糊在黑底上，
-   所以按自己的配色覆盖一遍：markdown 代码块和文本/代码预览共用这套色板 */
-body.dark .md-body .hljs,
-body.dark .text-view .hljs {
-  color: #d6deeb;
-}
-body.dark .md-body .hljs-comment,
-body.dark .text-view .hljs-comment,
-body.dark .md-body .hljs-quote,
-body.dark .text-view .hljs-quote {
-  color: #7c8ea6;
+.hljs-comment,
+.hljs-quote {
+  color: var(--color-code-comment);
   font-style: italic;
 }
-body.dark .md-body .hljs-keyword,
-body.dark .text-view .hljs-keyword,
-body.dark .md-body .hljs-selector-tag,
-body.dark .text-view .hljs-selector-tag,
-body.dark .md-body .hljs-doctag,
-body.dark .text-view .hljs-doctag {
-  color: #c792ea;
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-formula {
+  color: var(--color-code-keyword);
 }
-body.dark .md-body .hljs-string,
-body.dark .text-view .hljs-string,
-body.dark .md-body .hljs-regexp,
-body.dark .text-view .hljs-regexp,
-body.dark .md-body .hljs-addition,
-body.dark .text-view .hljs-addition {
-  color: #9ecb7f;
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--color-code-string);
 }
-body.dark .md-body .hljs-number,
-body.dark .text-view .hljs-number,
-body.dark .md-body .hljs-literal,
-body.dark .text-view .hljs-literal,
-body.dark .md-body .hljs-meta,
-body.dark .text-view .hljs-meta {
-  color: #d19a66;
+
+.hljs-number,
+.hljs-literal,
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--color-code-number);
 }
-body.dark .md-body .hljs-title,
-body.dark .text-view .hljs-title,
-body.dark .md-body .hljs-attr,
-body.dark .text-view .hljs-attr,
-body.dark .md-body .hljs-attribute,
-body.dark .text-view .hljs-attribute,
-body.dark .md-body .hljs-variable,
-body.dark .text-view .hljs-variable {
-  color: #61afef;
+
+.hljs-title,
+.hljs-attr,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--color-code-title);
 }
-body.dark .md-body .hljs-built_in,
-body.dark .text-view .hljs-built_in,
-body.dark .md-body .hljs-type,
-body.dark .text-view .hljs-type,
-body.dark .md-body .hljs-symbol,
-body.dark .text-view .hljs-symbol,
-body.dark .md-body .hljs-bullet,
-body.dark .text-view .hljs-bullet {
-  color: #56b6c2;
+
+.hljs-built_in,
+.hljs-type,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-params {
+  color: var(--color-code-builtin);
 }
-body.dark .md-body .hljs-section,
-body.dark .text-view .hljs-section,
-body.dark .md-body .hljs-name,
-body.dark .text-view .hljs-name,
-body.dark .md-body .hljs-tag,
-body.dark .text-view .hljs-tag,
-body.dark .md-body .hljs-deletion,
-body.dark .text-view .hljs-deletion {
-  color: #e06c75;
+
+.hljs-name,
+.hljs-section,
+.hljs-tag,
+.hljs-deletion,
+.hljs-link {
+  color: var(--color-code-name);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 700;
 }

@@ -5,7 +5,6 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from "rehype-sanitize";
-import "highlight.js/styles/github.css";
 import { Empty, Tag, message, pressable } from "../../ui";
 import { openPath, revealInExplorer } from "../../api/shell";
 import OfficePreview from "./OfficePreview";
@@ -121,7 +120,7 @@ export default function PreviewPanel({ node, record, preview }: Props) {
         minHeight: 240,
         border: "1px solid var(--color-border)",
         borderRadius: "var(--radius-control)",
-        background: "#fff",
+        background: "var(--color-paper)",
       }}
     />
   ) : kind === "sheet" || kind === "doc" ? (

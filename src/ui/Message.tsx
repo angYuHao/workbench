@@ -36,9 +36,9 @@ export const message = {
 };
 
 const styles: Record<MessageType, { bg: string; fg: string; border: string }> = {
-  info: { bg: "#EFF6FF", fg: "#1E40AF", border: "#3B82F6" },
-  success: { bg: "#F0FDF4", fg: "#166534", border: "#22C55E" },
-  error: { bg: "#FEF2F2", fg: "#991B1B", border: "#EF4444" },
+  info: { bg: "var(--color-info-soft)", fg: "var(--color-info-text)", border: "var(--color-info-edge)" },
+  success: { bg: "var(--color-success-soft)", fg: "var(--color-success-text)", border: "var(--color-success-edge)" },
+  error: { bg: "var(--color-danger-soft)", fg: "var(--color-danger-text)", border: "var(--color-danger-edge)" },
 };
 
 export function MessageContainer() {
@@ -79,7 +79,7 @@ export function MessageContainer() {
               color: s.fg,
               border: `1px solid ${s.border}`,
               fontSize: 14,
-              boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+              boxShadow: "var(--shadow-floating)",
               animation: "msgIn 0.2s ease",
             }}
           >

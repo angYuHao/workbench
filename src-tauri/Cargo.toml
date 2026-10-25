@@ -1,6 +1,6 @@
 [package]
 name = "workbench"
-version = "1.0.2"
+version = "1.0.3"
 description = "个人工作台 - 桌面整理 / 网址管理 / 文件管理"
 authors = ["workbench"]
 edition = "2021"
@@ -46,6 +46,8 @@ windows = { version = "0.58", features = [
     "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
+    # 抽屉那层要读鼠标键有没有按着（拖拽中途别收窗）
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_Storage_FileSystem",
     "Win32_Graphics_Gdi",
 ] }

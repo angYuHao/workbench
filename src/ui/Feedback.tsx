@@ -46,9 +46,9 @@ interface TagProps {
 
 const tagColors: Record<string, { bg: string; fg: string }> = {
   default: { bg: "var(--color-border)", fg: "var(--color-text)" },
-  warning: { bg: "#FEF3C7", fg: "#92400E" },
-  success: { bg: "#D1FAE5", fg: "#065F46" },
-  danger: { bg: "#FEE2E2", fg: "#991B1B" },
+  warning: { bg: "var(--color-warning-soft)", fg: "var(--color-warning-text)" },
+  success: { bg: "var(--color-success-soft)", fg: "var(--color-success-text)" },
+  danger: { bg: "var(--color-danger-soft)", fg: "var(--color-danger-text)" },
 };
 
 export function Tag({ color = "default", children, style }: TagProps) {

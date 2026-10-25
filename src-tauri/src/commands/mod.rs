@@ -4,6 +4,7 @@ pub mod categories;
 pub mod categorize;
 pub mod desktop;
 pub mod files;
+pub mod notify;
 pub mod screen;
 pub mod settings;
 pub mod totp;
