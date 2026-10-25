@@ -1,11 +1,11 @@
-//! 顶边抽屉：鼠标顶到屏幕最上沿，从顶边中间滑出一块搜索面板（全部应用 / 全部网址，可搜可点开）。
+//! 顶边抽屉：鼠标顶到屏幕最上沿**中间那一段**，从顶边滑出一块搜索面板（全部应用 / 全部网址，可搜可点开）。
+//! 左右两端的顶边划过什么都不出 —— 那两段下面是别人窗口的标题栏和最小化按钮，顶到就弹一条会把它们挡掉。
 //!
 //! 它是独立的一个窗口（label = `drawer`），跟主窗口互不相干：主窗口该开着就开着、该藏着就藏着，
 //! 顶边划过不会动它一下。这也是把抽屉从主窗口里拆出来的原因 —— 以前顶边一划是把主窗口
 //! 拉来贴顶，等于每次 glance 一下都要劫持一次用户正在用的那个页面。
 //!
 //! 尺寸是工作区宽度的三分之一、横向居中、高度五分之二，里面两栏各自滚动。
-//! 铺满整条顶边会压住别人窗口的标题栏，所以只占中间那一段。
 //!
 //! **它是可交互的**：显示即拿焦点（要能直接打字搜索），所以点它会把你正在输入的窗口的焦点抢走 ——
 //! 这是「能搜」换来的代价，不划出来的时候它压根不在屏幕上。置顶是无条件的：
@@ -15,7 +15,11 @@
 //! 线程，而且这台机器上「全局快捷键唤出」那套已经因为撞键被拆掉过（见 README）。每 150ms 读一次
 //! `GetCursorPos` 只要一个 sleep 循环，代价是最多晚 150ms 才弹出，手感上看不出来。
 //!
-//! 两条不打扰的规则：
+//! 收起是不计时的：光标划出矩形、或者焦点被别的窗口抢走，下一轮轮询（最多 150ms）就收。
+//! 几条不打扰的例外：
+//! - **刚弹出那 700ms**：`set_focus` 未必已经落定，这时候判「没焦点」会自己把自己关掉。
+//! - **焦点压根没落上来过**：有的全屏程序死占焦点，这时「没焦点」是常态不是「人走了」，
+//!   照它收会 弹出→收→弹出 地闪（光标一直待在顶边那三个像素里，收了马上又触发）。
 //! - **Engaged 那一下**：光标真的进过面板一次，才允许自动收起。所以点托盘的「显示主窗口」
 //!   （光标还在托盘上）不会一闪就没。
 //! - **按住不放就不收**：正在拖东西、正在面板里选中文字时，光标迟早会越出矩形，
@@ -39,8 +43,8 @@ use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 const POLL: Duration = Duration::from_millis(150);
 /// 光标顶到工作区上沿几个像素以内算「顶边」
 const EDGE_PX: i32 = 3;
-/// 光标离开窗口矩形多久才真的收起：防路过边缘的一下抖动
-const LEAVE: Duration = Duration::from_millis(450);
+/// 刚弹出来这一小会儿不收：焦点可能还没落到面板上，抢着判会自己把自己关掉
+const SETTLE: u64 = 700;
 /// 抽屉那条的 label。它和主窗口是两个窗口，谁也不碰谁。
 const DRAWER_LABEL: &str = "drawer";
 /// 宽度取工作区的三分之一、横向居中：顶边中间那块是「抬头看一眼」的位置，
@@ -57,10 +61,10 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 static RUNNING: AtomicBool = AtomicBool::new(false);
 /// 光标这轮是否真的进过抽屉——没进过就不自动收（托盘唤回的场景靠它）
 static ENGAGED: AtomicBool = AtomicBool::new(false);
+/// 这轮抽屉有没有拿到过焦点。丢焦点算不算「人走了」只在拿到过之后才成立，见轮询里那段
+static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
 /// 上一次「显示 + 让出焦点」的时刻：刚叫出来的这一小会儿不收
 static SHOWN_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// 光标离开窗口的起点，0 表示现在在里面
-static LEFT_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// 工作区：显示器去掉任务栏那块，顶边和贴顶尺寸都以它为准
 struct Work {
@@ -119,15 +123,21 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// 面板横向占的那一段：左边界和宽度。触发区和面板**必须用同一个算法**，
+/// 分成两处写迟早对不上——变成「弹出来的位置和我顶的那条边不是一回事」
+fn panel_span(work: &Work) -> (i32, i32) {
+    let width = work.width / WIDTH_SHARE;
+    (work.left + (work.width - width) / 2, width)
+}
+
 /// 贴顶居中显示：宽取工作区三分之一、高取五分之二，里面自己滚
 fn show_drawer(app: &AppHandle, work: &Work) {
     let Some(w) = app.get_webview_window(DRAWER_LABEL) else {
         return;
     };
     // 工作区的尺寸本来就是物理像素，直接按份额切，不用再折一次 DPI
-    let width = work.width / WIDTH_SHARE;
+    let (left, width) = panel_span(work);
     let height = (work.height * 2 / HEIGHT_SHARE).max(MIN_HEIGHT);
-    let left = work.left + (work.width - width) / 2;
     let _ = w.set_size(PhysicalSize::new(width as u32, height as u32));
     let _ = w.set_position(PhysicalPosition::new(left, work.top));
     let _ = w.show();
@@ -135,8 +145,8 @@ fn show_drawer(app: &AppHandle, work: &Work) {
     // 不划出来的时候它压根不在屏幕上
     let _ = w.set_focus();
     SHOWN_AT.store(now_ms(), Ordering::Relaxed);
-    LEFT_AT.store(0, Ordering::Relaxed);
     ENGAGED.store(false, Ordering::Relaxed);
+    HAD_FOCUS.store(false, Ordering::Relaxed);
 }
 
 fn hide_drawer(app: &AppHandle) {
@@ -145,7 +155,7 @@ fn hide_drawer(app: &AppHandle) {
     };
     let _ = w.hide();
     ENGAGED.store(false, Ordering::Relaxed);
-    LEFT_AT.store(0, Ordering::Relaxed);
+    HAD_FOCUS.store(false, Ordering::Relaxed);
 }
 
 /// 光标在不在抽屉那条矩形里
@@ -181,29 +191,36 @@ pub fn start(app: &AppHandle) {
         let visible = w.is_visible().unwrap_or(false);
 
         if !visible {
-            let at_top = p.y <= work.top + EDGE_PX && p.x >= work.left && p.x < work.left + work.width;
-            if at_top {
+            // 触发区和面板同一套算法：左右两端那两段顶边划过什么都不出
+            let (left, width) = panel_span(&work);
+            if p.y <= work.top + EDGE_PX && p.x >= left && p.x < left + width {
                 show_drawer(&app, &work);
             }
             continue;
         }
 
-        if inside_window(&app, p) {
+        let inside = inside_window(&app, p);
+        if inside {
             ENGAGED.store(true, Ordering::Relaxed);
-            LEFT_AT.store(0, Ordering::Relaxed);
+        }
+        // 焦点只要落到面板上**过一次**，之后「丢焦点」才是真信号。从没拿到过焦点的时候
+        // （某个全屏程序死死占着不放）不靠它判断 —— 那样会陷入 弹出→收→弹出 的闪，
+        // 因为光标一直待在顶边那三个像素里。
+        let focused = w.is_focused().unwrap_or(false);
+        if focused {
+            HAD_FOCUS.store(true, Ordering::Relaxed);
+        }
+        // 刚叫出来的这一小会儿（焦点未必已经落定）、正拖着东西、光标还没进过面板：
+        // 这三样都先不收。除此之外不再有任何计时——离开即收。
+        if now_ms() - SHOWN_AT.load(Ordering::Relaxed) < SETTLE
+            || button_held()
+            || !ENGAGED.load(Ordering::Relaxed)
+        {
             continue;
         }
-        // 刚叫出来的这一小会儿、正拖着东西、或者光标还没进过窗口：都先不收
-        if now_ms() - SHOWN_AT.load(Ordering::Relaxed) < 700 || button_held() {
-            continue;
-        }
-        if !ENGAGED.load(Ordering::Relaxed) {
-            continue;
-        }
-        let left_at = LEFT_AT.load(Ordering::Relaxed);
-        if left_at == 0 {
-            LEFT_AT.store(now_ms(), Ordering::Relaxed);
-        } else if now_ms() - left_at >= LEAVE.as_millis() as u64 {
+        // 「离开了」有两种：光标划出矩形，或者鼠标还停在面板里但焦点已经被点走的别的窗口抢走
+        //（那种情况面板已经打字不了了，留着只是挡屏幕）
+        if !inside || (HAD_FOCUS.load(Ordering::Relaxed) && !focused) {
             hide_drawer(&app);
         }
     });
@@ -215,7 +232,6 @@ pub fn start(app: &AppHandle) {
 pub fn apply(app: &AppHandle, on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
     ENGAGED.store(false, Ordering::Relaxed);
-    LEFT_AT.store(0, Ordering::Relaxed);
     if !on {
         hide_drawer(app);
     }
@@ -229,4 +245,28 @@ pub fn reveal_once(app: &AppHandle) {
     let _ = w.show();
     let _ = w.set_focus();
     SHOWN_AT.store(now_ms(), Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 触发区 = 面板本身，而且只占中间那一段：两端各留三分之一，划过不弹
+    #[test]
+    fn trigger_is_the_middle_third_only() {
+        let work = Work { left: 0, top: 0, width: 1920, height: 1080 };
+        let (left, width) = panel_span(&work);
+        assert_eq!(width, 640);
+        assert_eq!(left, 640);
+        assert!(left > work.left, "左端那一段不该触发");
+        assert!(left + width < work.left + work.width, "右端那一段不该触发");
+    }
+
+    /// 副屏挂在左边时工作区原点是个负数，居中不能按 0 算
+    #[test]
+    fn panel_span_follows_a_shifted_work_area() {
+        let work = Work { left: -1920, top: 0, width: 1920, height: 1080 };
+        let (left, width) = panel_span(&work);
+        assert_eq!((left + width / 2, width), (-960, 640));
+    }
 }
