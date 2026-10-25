@@ -32,12 +32,28 @@ jobs:
       # CONTRIBUTING 那五道门，tauri build 只自带 tsc + vite build 这两道（beforeBuildCommand）。
       # 单测、clippy 和颜色守卫在这儿补上：否则 Rust 侧的逻辑回归、以及抄进组件里的裸色值能一路打进 Release。
       # 不加 `-D warnings`：runner 上的工具链比本机新，新 clippy 规则只会让发版莫名变红。
+      #
+      # 这一步已经连着两轮（v1.0.2、v1.0.3）在本机全绿的情况下 exit 101，而日志本体要 token 才能下 ——
+      # 维护者懒得登、agent 更登不进去，于是每次都只能回来「猜一个原因」。照「编译并打包」那步的现成
+      # 写法把尾巴写成 annotation（annotation 匿名可读），再把工具链版本落在第一行：下一次红的是原因
+      # 自己送上门。
       - name: 后端单测与 clippy
         shell: bash
         run: |
           cd src-tauri
-          cargo test
-          cargo clippy --all-targets
+          { echo "toolchain: $(rustc -vV | tr '\n' ' ')"; echo "cargo: $(cargo -V)"; } > ../rust.log
+          if cargo test >> ../rust.log 2>&1 && cargo clippy --all-targets >> ../rust.log 2>&1; then
+            tail -4 ../rust.log
+            exit 0
+          fi
+          echo "--- 挂掉的测试 ---"
+          sed -n '/^failures:/,/^test result/p' ../rust.log | head -40
+          echo "--- 最后 30 行 ---"
+          tail -30 ../rust.log
+          # annotation 条数有上限，只喂最值钱的：工具链版本 + 失败名单 + 尾巴
+          { head -2 ../rust.log; sed -n '/^failures:/,/^test result/p' ../rust.log | head -8; tail -12 ../rust.log; } |
+            sed 's/%/%25/g' | while IFS= read -r line; do echo "::error::${line%$'\r'}"; done
+          exit 1
 
       # tauri build 先跑 beforeBuildCommand（tsc && vite build），再去 GitHub 下 WiX 和 NSIS。
       # 日志本体要 token 才能下，所以失败时把尾巴写成 annotation —— 那个接口匿名可读。
@@ -55,13 +71,15 @@ jobs:
           done
           exit 1
 
-      # 失败也要留日志，网页里能直接下载
+      # 失败也要留日志，网页里能直接下载（rust.log = 后端那步的全文，build.log = 打包那步的全文）
       - name: 存日志
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
-          path: build.log
+          path: |
+            build.log
+            rust.log
           if-no-files-found: ignore
 
       # 产物路径：MSI 在 bundle/msi，NSIS 在 bundle/nsis
