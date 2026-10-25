@@ -236,8 +236,14 @@ mod tests {
             let kids = key.unwrap().child_names();
             println!("{arch:?} 视图下有 {} 个子键", kids.len());
         }
-        // 当前用户那份也在， per-user 安装的东西只登记在这儿
-        assert!(Key::open(Hive::Current, sub, Arch::Native).is_some());
+        // 当前用户那份**不一定存在**：per-user 装的程序才登记在这儿，一台干净机器（CI runner
+        // 就是）一个都没有，这个键也就没有。要求它存在等于在断言「这台机器装过软件」——那是
+        // 机器的性质，不是这层的性质；隔壁 a_missing_key_yields_nothing 说的正是「打不开回 None」，
+        // 两条对着写才不自相矛盾。所以有就顺手报个数，没有就跳过去。
+        match Key::open(Hive::Current, sub, Arch::Native) {
+            Some(key) => println!("HKCU 那份有 {} 个子键", key.child_names().len()),
+            None => eprintln!("HKCU 没有 Uninstall 键（这台机器没登记 per-user 程序），跳过"),
+        }
     }
 
     /// 打不开的键回 None，不 panic

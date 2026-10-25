@@ -50,8 +50,13 @@ jobs:
           sed -n '/^failures:/,/^test result/p' ../rust.log | head -40
           echo "--- 最后 30 行 ---"
           tail -30 ../rust.log
-          # annotation 条数有上限，只喂最值钱的：工具链版本 + 失败名单 + 尾巴
-          { head -2 ../rust.log; sed -n '/^failures:/,/^test result/p' ../rust.log | head -8; tail -12 ../rust.log; } |
+          # annotation 条数有上限，只喂最值钱的：工具链版本、过/挂的数目、挂掉的名单、尾巴。
+          # 上一版喂的是「failures 段前 8 行 + 尾 12 行」，结果一段失败详情就占满了 8 行，
+          # 看不出还有没有别的测试同时挂着 —— 又要多跑一轮才知道
+          { head -2 ../rust.log
+            grep -E '^test result|^error' ../rust.log | head -4
+            sed -n '/^failures:$/,$p' ../rust.log | grep -E '^    [A-Za-z0-9_:]+$' | head -8
+            tail -4 ../rust.log; } |
             sed 's/%/%25/g' | while IFS= read -r line; do echo "::error::${line%$'\r'}"; done
           exit 1
 
