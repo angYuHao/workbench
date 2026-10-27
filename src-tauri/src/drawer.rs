@@ -8,8 +8,11 @@
 //! 尺寸是工作区宽度的三分之一、横向居中、高度五分之二，里面两栏各自滚动。
 //!
 //! **它是可交互的**：显示即拿焦点（要能直接打字搜索），所以点它会把你正在输入的窗口的焦点抢走 ——
-//! 这是「能搜」换来的代价，不划出来的时候它压根不在屏幕上。置顶是无条件的：
-//! 全屏播放、打游戏、放映 PPT 时划过顶边照样出（以前那条「全屏不弹出」的闸按需求去掉了）。
+//! 这是「能搜」换来的代价，不划出来的时候它压根不在屏幕上。
+//!
+//! **全屏不弹出**：光标那块屏幕被一个铺满整块显示器的窗口盖着（独占/无边框全屏的游戏、放映、
+//! 全屏播放器）就当手滑，不弹。判的是「前景窗口 vs 整块屏幕」，最大化窗口停在任务栏上方所以不算；
+//! 双屏时只挡游戏那一块屏，另一块屏照弹。真弹出来的时候置顶仍然无条件。
 //!
 //! 为什么是轮询而不是全局鼠标钩子：`SetWindowsHookEx(WH_MOUSE_LL)` 要一条一直在 pump 消息的
 //! 线程，而且这台机器上「全局快捷键唤出」那套已经因为撞键被拆掉过（见 README）。每 150ms 读一次
@@ -37,7 +40,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
 };
-use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, GetWindowRect};
 
 /// 轮询间隔：足够快到手感看不出来，又不至于白烧 CPU
 const POLL: Duration = Duration::from_millis(150);
@@ -66,12 +69,15 @@ static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
 /// 上一次「显示 + 让出焦点」的时刻：刚叫出来的这一小会儿不收
 static SHOWN_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// 工作区：显示器去掉任务栏那块，顶边和贴顶尺寸都以它为准
+/// 工作区：显示器去掉任务栏那块，顶边和贴顶尺寸都以它为准。
+/// `monitor` 是**整块屏幕**，含任务栏那一条 —— 判「有没有人全屏」要跟它比，跟工作区比会把
+/// 最大化窗口（正好停在任务栏上方）也认成全屏
 struct Work {
     left: i32,
     top: i32,
     width: i32,
     height: i32,
+    monitor: RECT,
 }
 
 fn monitor_of(point: POINT) -> Option<Work> {
@@ -85,16 +91,17 @@ fn monitor_of(point: POINT) -> Option<Work> {
         if !GetMonitorInfoW(hmon, &mut info).as_bool() {
             return None;
         }
-        Some(rect_to_work(info.rcWork))
+        Some(rect_to_work(info.rcWork, info.rcMonitor))
     }
 }
 
-fn rect_to_work(rc: RECT) -> Work {
+fn rect_to_work(rc: RECT, monitor: RECT) -> Work {
     Work {
         left: rc.left,
         top: rc.top,
         width: rc.right - rc.left,
         height: rc.bottom - rc.top,
+        monitor,
     }
 }
 
@@ -103,6 +110,26 @@ fn cursor() -> Option<(POINT, Work)> {
         let mut p = POINT::default();
         GetCursorPos(&mut p).ok()?;
         Some((p, monitor_of(p)?))
+    }
+}
+
+/// 前景窗口矩形有没有把整块屏幕铺满。用 `>=`/`<=` 而不是等号：有的全屏实现把窗口开得比屏幕
+/// 还大一两个像素，等号会漏判
+fn covers_monitor(fg: &RECT, mon: &RECT) -> bool {
+    fg.left <= mon.left && fg.top <= mon.top && fg.right >= mon.right && fg.bottom >= mon.bottom
+}
+
+/// 这块屏幕上是不是正盖着一个全屏窗口（独占全屏的游戏、无边框全屏的游戏、放映、全屏播放器
+/// 都算）。最大化不算 —— 它停在任务栏上方，比整块屏幕矮一条，比的是 `monitor` 不是工作区。
+/// 读不到就当没全屏：宁可弹出来，也别把一次正常的顶边判成游戏
+fn foreground_fullscreen(mon: &RECT) -> bool {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_invalid() {
+            return false;
+        }
+        let mut rc = RECT::default();
+        GetWindowRect(hwnd, &mut rc).map(|_| covers_monitor(&rc, mon)).unwrap_or(false)
     }
 }
 
@@ -194,7 +221,12 @@ pub fn start(app: &AppHandle) {
             // 触发区和面板同一套算法：左右两端那两段顶边划过什么都不出
             let (left, width) = panel_span(&work);
             if p.y <= work.top + EDGE_PX && p.x >= left && p.x < left + width {
-                show_drawer(&app, &work);
+                // 这块屏幕被全屏窗口盖着就不弹：打游戏时划到顶边多半是手滑，弹一条糊在脸上
+                // 比不弹烦人得多。只挡「弹出」这一件事 —— 已经弹出来的照常按光标和焦点收，
+                // 置顶也仍然是无条件（真要弹出来时它得盖在游戏上面）
+                if !foreground_fullscreen(&work.monitor) {
+                    show_drawer(&app, &work);
+                }
             }
             continue;
         }
@@ -251,22 +283,62 @@ pub fn reveal_once(app: &AppHandle) {
 mod tests {
     use super::*;
 
+    /// 一块 1920x1080 的主屏，原点 0,0
+    const MON: RECT = RECT { left: 0, top: 0, right: 1920, bottom: 1080 };
+
+    /// 测试用的工作区：默认整块屏就是工作区（判 panel_span 只用得到 left/width）
+    fn work(left: i32, top: i32, width: i32, height: i32) -> Work {
+        Work {
+            left,
+            top,
+            width,
+            height,
+            monitor: RECT { left, top, right: left + width, bottom: top + height },
+        }
+    }
+
     /// 触发区 = 面板本身，而且只占中间那一段：两端各留三分之一，划过不弹
     #[test]
     fn trigger_is_the_middle_third_only() {
-        let work = Work { left: 0, top: 0, width: 1920, height: 1080 };
-        let (left, width) = panel_span(&work);
+        let w = work(0, 0, 1920, 1080);
+        let (left, width) = panel_span(&w);
         assert_eq!(width, 640);
         assert_eq!(left, 640);
-        assert!(left > work.left, "左端那一段不该触发");
-        assert!(left + width < work.left + work.width, "右端那一段不该触发");
+        assert!(left > w.left, "左端那一段不该触发");
+        assert!(left + width < w.left + w.width, "右端那一段不该触发");
     }
 
     /// 副屏挂在左边时工作区原点是个负数，居中不能按 0 算
     #[test]
     fn panel_span_follows_a_shifted_work_area() {
-        let work = Work { left: -1920, top: 0, width: 1920, height: 1080 };
-        let (left, width) = panel_span(&work);
+        let (left, width) = panel_span(&work(-1920, 0, 1920, 1080));
         assert_eq!((left + width / 2, width), (-960, 640));
+    }
+
+    /// 铺满整块屏幕才算全屏。判的是不等号不是等号 —— 有的实现把窗口开得比屏幕还大一两个像素
+    #[test]
+    fn a_window_that_fills_the_screen_counts() {
+        assert!(covers_monitor(&MON, &MON));
+        assert!(
+            covers_monitor(&RECT { left: -1, top: -1, right: 1921, bottom: 1081 }, &MON),
+            "开得比屏幕还大也该认下来"
+        );
+    }
+
+    /// 最大化停在任务栏上方，比整块屏幕矮一条。把它当全屏幕的话，日常用电脑就再也弹不出抽屉了
+    #[test]
+    fn a_maximized_window_is_not_fullscreen() {
+        assert!(!covers_monitor(
+            &RECT { left: 0, top: 0, right: 1920, bottom: 1032 },
+            &MON
+        ));
+    }
+
+    /// 双屏：游戏盖的是它自己那一块，另一块屏的顶边照样该弹
+    #[test]
+    fn a_fullscreen_on_the_other_screen_does_not_leak() {
+        let aux = RECT { left: -1920, top: 0, right: 0, bottom: 1080 };
+        assert!(covers_monitor(&aux, &aux), "副屏那块是铺满的");
+        assert!(!covers_monitor(&aux, &MON), "但它没盖住主屏");
     }
 }
