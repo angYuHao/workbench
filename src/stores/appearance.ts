@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getSettings, setSetting } from "../api/settings";
 import { applySeed, resolveMode, watchSystemMode } from "../styles/apply";
 import { DEFAULT_STYLE_ID, PRESETS, mergeSeed, presetById, seedOf, type Mode, type StyleSeed } from "../styles/seeds";
@@ -13,11 +14,28 @@ export interface UserStyle {
 const K_STYLE = "appearance.style_id";
 const K_OVERRIDES = "appearance.overrides";
 const K_USER = "appearance.user_styles";
+/** 界面缩放：不是颜色也不是排布 token，是整块 webview 的缩放，所以不进种子、不进分享用的 JSON */
+const K_ZOOM = "appearance.zoom";
+export const ZOOM_STEPS = [0.9, 1, 1.1, 1.2] as const;
+
+/** 缩放落在窗口上而不是某个页面里，所以两个窗口各自在 load() 时给自己应用一次 */
+function applyZoom(scale: number) {
+  // 浏览器里直接开 vite 时没有 webview，那条路径只是开发态看界面，失败就忽略
+  void getCurrentWebview()
+    .setZoom(scale)
+    .catch(() => undefined);
+}
+
+function readZoom(raw: string | undefined): number {
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= 0.8 && v <= 1.5 ? v : 1;
+}
 
 interface AppearanceStore {
   styleId: string;
   overrides: Partial<StyleSeed>;
   userStyles: UserStyle[];
+  zoom: number;
   loaded: boolean;
   load: () => Promise<void>;
   /** 当前状态展开成完整种子：面板预览和写库都用它 */
@@ -25,6 +43,9 @@ interface AppearanceStore {
   setStyle: (id: string) => Promise<void>;
   patch: (part: Partial<StyleSeed>) => void;
   setMode: (mode: Mode) => Promise<void>;
+  setZoom: (scale: number) => void;
+  /** 只把缩放这一项按库补一次，给别的窗口用 */
+  syncZoom: () => Promise<void>;
   reset: () => Promise<void>;
   saveStyle: (name: string) => Promise<void>;
   removeStyle: (id: string) => Promise<void>;
@@ -60,13 +81,14 @@ export const useAppearanceStore = create<AppearanceStore>((set, get) => {
   /** 落库这件事不必追着取色器的每一次拖动做，界面先变、稍后写 */
   let saveTimer: number | undefined;
   const persist = () => {
-    const { styleId, overrides, userStyles } = get();
+    const { styleId, overrides, userStyles, zoom } = get();
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
       void Promise.all([
         setSetting(K_STYLE, styleId),
         setSetting(K_OVERRIDES, JSON.stringify(overrides)),
         setSetting(K_USER, JSON.stringify(userStyles)),
+        setSetting(K_ZOOM, String(zoom)),
         // 旧键继续维护：它是「当前是深色还是浅色」的唯一历史口径，按解析后的种子写才不会在用户风格下报错值
         setSetting("theme", resolveMode(currentSeed().mode)),
       ]);
@@ -90,18 +112,22 @@ export const useAppearanceStore = create<AppearanceStore>((set, get) => {
     styleId: DEFAULT_STYLE_ID,
     overrides: {},
     userStyles: [],
+    zoom: 1,
     loaded: false,
     load: async () => {
       const settings = await getSettings();
       const userStyles = parse<UserStyle[]>(settings[K_USER], []);
       const { styleId, overrides } = migrate(settings);
+      const zoom = readZoom(settings[K_ZOOM]);
       set({
         styleId: isPresetOrUser(styleId, userStyles) ? styleId : DEFAULT_STYLE_ID,
         overrides,
         userStyles,
+        zoom,
         loaded: true,
       });
       render();
+      applyZoom(zoom);
     },
     seed: currentSeed,
     setStyle: async (id) => {
@@ -118,6 +144,21 @@ export const useAppearanceStore = create<AppearanceStore>((set, get) => {
     setMode: async (mode) => {
       set({ overrides: { ...get().overrides, mode } });
       render();
+      persist();
+    },
+    /** 别的窗口改了缩放：只按库补这一项。不重排 token、更不写镜像 —— 在 storage 回调里写镜像
+     *  会唤起对面的 storage 事件再写回来，两个窗口就成了无限往返（所以 token 走镜像、这项走总线） */
+    syncZoom: async () => {
+      const settings = await getSettings();
+      const zoom = readZoom(settings[K_ZOOM]);
+      if (zoom === get().zoom) return;
+      set({ zoom });
+      applyZoom(zoom);
+    },
+    /** 缩放不重排 token，它整块改 webview：字体、按钮、图标一起等比走，所以那 56 处写死的 px 不用动 */
+    setZoom: (scale) => {
+      set({ zoom: scale });
+      applyZoom(scale);
       persist();
     },
     /** 「回到预设默认」只清档位覆盖，mode 那一轴单独留着 —— 不然深色用户点一下重置就被扔回浅色 */

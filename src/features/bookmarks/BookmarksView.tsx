@@ -207,54 +207,6 @@ export default function BookmarksView() {
 
   return (
     <div className="page">
-      <div className="toolbar">
-        <h2 className="toolbar-title toolbar-title-pane">网页管理</h2>
-        <SearchBox placeholder="搜索标题 / 网址 / 说明" value={keyword} onChange={setKeyword} />
-        <div className="toolbar-spacer" />
-        {selection.active ? (
-          <SelectionBar
-            selection={selection}
-            allIds={visible.map((b) => b.id)}
-            onDelete={handleDelete}
-            onBlock={blockSelected}
-          />
-        ) : (
-          <Space>
-            <Dropdown menu={{ items: BROWSERS, onClick: ({ key }) => handleImport(key) }}>
-              <Button>导入书签</Button>
-            </Dropdown>
-            <Button
-              type="primary"
-              icon={<Plus size={16} />}
-              onClick={() => setEdit({ ...emptyBookmark, categoryId: activeCategory })}
-            >
-              添加网址
-            </Button>
-            <Button
-              icon={<Sparkles size={16} />}
-              onClick={() => restart(onlyNew)}
-              disabled={visible.length === 0}
-            >
-              智能分类
-            </Button>
-            <Button
-              icon={<Wand2 size={16} />}
-              onClick={() => analysis.start(visible.map((b) => b.id))}
-              disabled={visible.length === 0}
-            >
-              智能分析
-            </Button>
-            <Button
-              icon={<Square size={16} />}
-              onClick={selection.start}
-              disabled={visible.length === 0}
-            >
-              选择
-            </Button>
-          </Space>
-        )}
-      </div>
-
       <div className="panes">
         <div className="side-pane">
           <CategoryTree
@@ -271,6 +223,45 @@ export default function BookmarksView() {
         </div>
 
         <div className="content-pane">
+          <div className="card-bar">
+            <h2 className="card-bar-title">网页管理</h2>
+            <SearchBox placeholder="搜索标题 / 网址 / 说明" value={keyword} onChange={setKeyword} />
+            <div className="toolbar-spacer" />
+            {selection.active ? (
+              <SelectionBar
+                selection={selection}
+                allIds={visible.map((b) => b.id)}
+                onDelete={handleDelete}
+                onBlock={blockSelected}
+              />
+            ) : (
+              <Space>
+                <Dropdown menu={{ items: BROWSERS, onClick: ({ key }) => handleImport(key) }}>
+                  <Button>导入书签</Button>
+                </Dropdown>
+                <Button
+                  type="primary"
+                  icon={<Plus size={16} />}
+                  onClick={() => setEdit({ ...emptyBookmark, categoryId: activeCategory })}
+                >
+                  添加网址
+                </Button>
+                <Button icon={<Sparkles size={16} />} onClick={() => restart(onlyNew)} disabled={visible.length === 0}>
+                  智能分类
+                </Button>
+                <Button
+                  icon={<Wand2 size={16} />}
+                  onClick={() => analysis.start(visible.map((b) => b.id))}
+                  disabled={visible.length === 0}
+                >
+                  智能分析
+                </Button>
+                <Button icon={<Square size={16} />} onClick={selection.start} disabled={visible.length === 0}>
+                  选择
+                </Button>
+              </Space>
+            )}
+          </div>
           {trash.trash > 0 && (
             <div className="smart-foot" style={{ marginBottom: 8 }}>
               上次分析删掉了 {trash.trash} 条重复书签

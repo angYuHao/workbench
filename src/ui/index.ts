@@ -7,6 +7,8 @@ export { Checkbox } from "./Checkbox";
 export { Modal, ModalConfirm, ConfirmContainer } from "./Modal";
 export { Tooltip } from "./Tooltip";
 export { Dropdown } from "./Dropdown";
+export { ContextMenu } from "./ContextMenu";
+export type { MenuItem } from "./ContextMenu";
 export { Spin, Empty, Tag, Space } from "./Feedback";
 export { Table } from "./Table";
 export { Form, FormItem, useForm } from "./Form";

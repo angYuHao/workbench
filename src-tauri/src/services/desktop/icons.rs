@@ -88,7 +88,7 @@ pub(crate) fn launch_target(path: &Path) -> String {
 }
 
 /// 规则里逗号分隔的字段，逐项去空白并转小写
-fn fnv1a(data: &[u8]) -> u64 {
+pub(crate) fn fnv1a(data: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for b in data {
         hash ^= *b as u64;

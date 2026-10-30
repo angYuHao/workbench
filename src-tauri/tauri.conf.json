@@ -22,7 +22,7 @@
         "center": true,
         "dragDropEnabled": false,
         "visible": false,
-        "decorations": true,
+        "decorations": false,
         "alwaysOnTop": false
       },
       {

@@ -95,9 +95,5 @@ fn seed(conn: &Connection) -> AppResult<()> {
         }
     }
 
-    conn.execute(
-        "INSERT OR IGNORE INTO settings (key, value) VALUES ('managed_folders', '[]')",
-        [],
-    )?;
     Ok(())
 }

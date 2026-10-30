@@ -209,39 +209,6 @@ export default function AppsView() {
 
   return (
     <div className="page">
-      <div className="toolbar">
-        <h2 className="toolbar-title">应用</h2>
-        <SearchBox placeholder="搜索程序名 / 路径" value={keyword} onChange={setKeyword} />
-        <div className="toolbar-spacer" />
-        {selection.active ? (
-          <SelectionBar
-            selection={selection}
-            allIds={visibleApps.map((a) => a.id)}
-            onDelete={handleDelete}
-          />
-        ) : (
-          <Space>
-            <Button icon={<RefreshCw size={16} />} loading={syncing} onClick={() => void sync(true)}>
-              重新同步
-            </Button>
-            <Button icon={<Plus size={16} />} onClick={() => setAddOpen(true)}>
-              添加程序
-            </Button>
-            <Button
-              type="primary"
-              icon={<Sparkles size={16} />}
-              onClick={() => restart(onlyNew)}
-              disabled={visibleApps.length === 0}
-            >
-              智能分类
-            </Button>
-            <Button icon={<Square size={16} />} onClick={selection.start} disabled={visibleApps.length === 0}>
-              选择
-            </Button>
-          </Space>
-        )}
-      </div>
-
       <div className="panes">
         <div className="side-pane apps-side">
           <CategoryTree
@@ -260,6 +227,38 @@ export default function AppsView() {
           <FilterDropSlot apps={apps} />
         </div>
         <div className="content-pane">
+          <div className="card-bar">
+            <h2 className="card-bar-title">应用</h2>
+            <SearchBox placeholder="搜索程序名 / 路径" value={keyword} onChange={setKeyword} />
+            <div className="toolbar-spacer" />
+            {selection.active ? (
+              <SelectionBar
+                selection={selection}
+                allIds={visibleApps.map((a) => a.id)}
+                onDelete={handleDelete}
+              />
+            ) : (
+              <Space>
+                <Button icon={<RefreshCw size={16} />} loading={syncing} onClick={() => void sync(true)}>
+                  重新同步
+                </Button>
+                <Button icon={<Plus size={16} />} onClick={() => setAddOpen(true)}>
+                  添加程序
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<Sparkles size={16} />}
+                  onClick={() => restart(onlyNew)}
+                  disabled={visibleApps.length === 0}
+                >
+                  智能分类
+                </Button>
+                <Button icon={<Square size={16} />} onClick={selection.start} disabled={visibleApps.length === 0}>
+                  选择
+                </Button>
+              </Space>
+            )}
+          </div>
           <AppIconGrid
             apps={visibleApps}
             selectMode={selection.active}

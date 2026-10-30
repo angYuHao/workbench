@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "drawer",
+  "description": "顶边抽屉那个窗口。default 那份的 windows 只写了 main，抽屉是第二个窗口，不单独给一份就是它一条权限都没有",
+  "windows": ["drawer"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-hide",
+    "core:webview:allow-set-webview-zoom"
+  ]
+}

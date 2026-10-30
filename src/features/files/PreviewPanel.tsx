@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from "rehype-sanitize";
-import { Empty, Tag, message, pressable } from "../../ui";
+import { Empty, Spin, Tag, message, pressable } from "../../ui";
 import { openPath, revealInExplorer } from "../../api/shell";
 import OfficePreview from "./OfficePreview";
 import TextPreview from "./TextPreview";
@@ -16,6 +16,8 @@ interface Props {
   node: FileNode | null;
   record: FileRecord | null;
   preview: ReadTextResult | null;
+  /** 后端把这个文件所在目录授权完了没有；没完就先别挂 `<img>`/`<iframe>`，早一帧就是一张碎图 */
+  ready: boolean;
 }
 
 /** 在 GitHub 那套默认白名单上，放开文档里常见的排版标签与排版属性（居中、图片尺寸等）。
@@ -92,9 +94,17 @@ function resolveMdSrc(url: string, baseDir: string): string {
   return stack.length ? convertFileSrc(stack.join(sep)) : "";
 }
 
-export default function PreviewPanel({ node, record, preview }: Props) {
+export default function PreviewPanel({ node, record, preview, ready }: Props) {
   if (!node) {
     return <Empty style={{ marginTop: 80, padding: 16 }} description="在文件列表中选择一个文件或文件夹" />;
+  }
+  /** 授权是一次 IPC，正在授的时候这块先占住，别拿碎图占 */
+  if (!ready) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", marginTop: 80 }}>
+        <Spin />
+      </div>
+    );
   }
 
   const kind = previewKind(node.name);
@@ -167,18 +177,23 @@ export default function PreviewPanel({ node, record, preview }: Props) {
       }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 13,
-            lineHeight: 1.6,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          {description}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* 列视图里文件列表可能被推到左边好几列外，预览这块得自己说清看的是谁 */}
+          <div style={{ fontSize: 14, fontWeight: 600, wordBreak: "break-word" }}>{node.name}</div>
+          {description && (
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 13,
+                lineHeight: 1.6,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              {description}
+            </div>
+          )}
         </div>
         {!node.isDir && (
           <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>

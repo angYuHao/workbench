@@ -6,7 +6,7 @@ app/                  外壳：AppLayout、Sidebar（底部是设置入口）、
 features/apps/        AppsView（「应用」页：注册表里的已安装程序）+ AppIconGrid
 features/bookmarks/   BookmarksView + BookmarkAnalysisModal + useBookmarkAnalysis
 features/drawer/      DrawerStrip —— 顶边那块搜索面板（全部应用 / 全部网页两栏、各自滚、可打字可点开）
-features/files/       FilesView + PreviewPanel / OfficePreview / TextPreview / PreviewError
+features/files/       FilesView（多栏 × 每栏多标签 × 每标签一串 Miller 列，浏览整台机器）+ FileHeader（页级表头：面包屑地址行在上、标签行在下，横跨整块内容区并跟着当前栏走；点空白或 Ctrl+L 可输入整条路径）+ FilePanel（一栏：列区/状态条，排序和批量动作都收进右键菜单）+ FileColumn（一列：目录内容，不带头行）+ listing（筛和排）+ useFileActions（删·拷·搬·刷新的共同入口，右键菜单和键盘都走它）+ PreviewPanel（选中具体文件才弹出的右栏）/ OfficePreview / TextPreview / PreviewError
 features/settings/    SettingsModal + 各个 Section + 编辑弹窗
 shared/               两个以上功能共用的界面件与 hook（CategoryTree、useCategoryScaffold、SelectionBar、SmartCategorizeModal、useIdSelection、useSmartScope、dragItem…）
 tools/                工具箱，一个工具一个目录 → 见 tools/README.md
@@ -16,7 +16,7 @@ stores/               zustand，每个功能一个 store
 ui/                   自研组件库：Button Table Modal Select Input SearchBox Form Tooltip…
 types/                按功能域分文件，index.ts 只做汇总
 styles/               global.css 只做 @import；剩下的按界面切成 9 个文件。颜色不在这里定 —— 见下面「颜色只有三个地方」
-utils/                真·通用：clipboard、error、fileKind、textFile
+utils/                真·通用：clipboard、error、fileKind、textFile、paths（Windows 路径当字符串处理）、humanize、sort（排序档位和标签）
 ```
 
 ## 约定

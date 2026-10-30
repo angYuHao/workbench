@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSettings, setSetting } from "../../api/settings";
 
-/** 这张 KV 里的键名。只有文件页在乎这条分栏，所以跟着页面命名，不占一个顶层键 */
+/** 这张 KV 里的键名。只有文件页在乎这几条分栏，所以跟着页面命名，不占一个顶层键 */
 const WIDTH_KEY = "files.preview_width";
 
 /**
@@ -70,4 +70,57 @@ export default function useSplitter() {
   );
 
   return { previewWidth, previewRef, startResize };
+}
+
+/** 拖栏间分栏时不许把左边那一栏压没的下限 */
+const COLUMN_MIN_WIDTH = 180;
+
+/**
+ * 文件夹栏之间那几条可拖的分栏。跟预览那条一个路子：拖动期间直接改 DOM 宽度（每帧进 store
+ * 会把整页重渲染一遍），松手才把渲染出来的宽度交给 store，由 store 落进布局快照。
+ *
+ * 方向相反：往右拖是给左边那一栏加宽，剩下的栏按 flex 自己分。
+ */
+export function useColumnResize(commit: (panelId: string, width: number) => void) {
+  const refs = useRef(new Map<string, HTMLDivElement>());
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+
+  const register = useCallback(
+    (panelId: string) => (el: HTMLDivElement | null) => {
+      if (el) refs.current.set(panelId, el);
+      else refs.current.delete(panelId);
+    },
+    [],
+  );
+
+  const startResize = useCallback((e: React.MouseEvent, panelId: string) => {
+    e.preventDefault();
+    const el = refs.current.get(panelId);
+    if (!el) return;
+    const startX = e.clientX;
+    const startWidth = Math.round(el.getBoundingClientRect().width);
+    let moved = false;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMove = (ev: MouseEvent) => {
+      moved = true;
+      el.style.flex = "0 0 auto";
+      el.style.width = `${Math.max(COLUMN_MIN_WIDTH, startWidth + ev.clientX - startX)}px`;
+    };
+    const onUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      if (!moved) return;
+      commitRef.current(panelId, Math.round(el.getBoundingClientRect().width));
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, []);
+
+  return { register, startResize };
 }

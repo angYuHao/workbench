@@ -16,6 +16,12 @@ use windows::Win32::Foundation::SIZE;
 
 /// 从可执行文件或快捷方式提取 64x64 图标并保存为 PNG。
 pub fn extract_icon_to_png(target: &str, out_png: &str) -> Result<(), String> {
+    extract_icon_at(target, out_png, 64)
+}
+
+/// 同一件事，尺寸自己定：文件页列表里只要 32，抽 64 再缩放是白干活（一张列表几百行）
+pub fn extract_icon_at(target: &str, out_png: &str, size: u32) -> Result<(), String> {
+    let side = size.max(16) as i32;
     unsafe {
         let wpath: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
         let item: IShellItem = SHCreateItemFromParsingName(PCWSTR(wpath.as_ptr()), None)
@@ -25,10 +31,7 @@ pub fn extract_icon_to_png(target: &str, out_png: &str) -> Result<(), String> {
             .map_err(|e| format!("获取图像工厂失败: {e}"))?;
 
         let hbmp: HBITMAP = factory
-            .GetImage(
-                SIZE { cx: 64, cy: 64 },
-                SIIGBF_ICONONLY | SIIGBF_RESIZETOFIT,
-            )
+            .GetImage(SIZE { cx: side, cy: side }, SIIGBF_ICONONLY | SIIGBF_RESIZETOFIT)
             .map_err(|e| format!("提取图标失败: {e}"))?;
 
         let r = bitmap_to_png(hbmp, out_png);

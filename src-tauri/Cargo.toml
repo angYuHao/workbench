@@ -41,6 +41,8 @@ windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
     "Win32_System_Registry",
     # 单实例那把命名互斥体
     "Win32_System_Threading",

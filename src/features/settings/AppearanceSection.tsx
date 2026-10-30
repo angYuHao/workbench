@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Dices, Download, Palette, RotateCcw, Save, Upload, X } from "lucide-react";
 import { Button, Input, Modal, ModalConfirm, TextArea, message } from "../../ui";
-import { useAppearanceStore } from "../../stores/appearance";
+import { ZOOM_STEPS, useAppearanceStore } from "../../stores/appearance";
 import { resolveMode } from "../../styles/apply";
 import { contrastReport, deriveTokens } from "../../styles/derive";
 import {
@@ -218,6 +218,9 @@ export default function AppearanceSection() {
         </SettingsLine>
         <SettingsLine title="密度" desc="改的是外壳的间距、栏内边距和控件高度；各功能页内部的排布暂时不跟着变">
           <Chips value={seed.density} options={DENSITY_STEPS} label={(v) => DENSITY_LABELS[v]} onPick={(v) => store.patch({ density: v as DensityStep })} />
+        </SettingsLine>
+        <SettingsLine title="界面缩放" desc="整块界面等比缩放，字体和按钮一起变小或变大 —— 嫌页面里那些写死字号的地方太大就用这条，密度管不到它们">
+          <Chips value={store.zoom} options={ZOOM_STEPS} label={(v) => `${Math.round(v * 100)}%`} onPick={(v) => store.setZoom(v)} />
         </SettingsLine>
         <SettingsLine title="文字浓度" desc="淡 = 整条文字灰阶往面上提一档，浓 = 往黑/白压一档；描边和斑马纹跟着一起挪">
           <Chips value={seed.ink} options={INK_STEPS} label={(v) => INK_LABELS[v]} onPick={(v) => store.patch({ ink: v as InkStep })} />

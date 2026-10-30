@@ -39,6 +39,22 @@
   flex: 0 0 calc(var(--side-pane-width) - var(--p-gap));
 }
 
+/* 卡片区的顶栏：搜索和那几个动作按钮从上面那条横跨两栏的工具栏挪到这里。
+   上面那一栏整行去掉之后，左边的分类栏直接顶到最上沿，省出来的一行给了卡片 */
+.card-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--p-gap);
+  margin-bottom: var(--p-pad);
+}
+
+/* 字号跟着密度走（原来那类 18px 写死的写法在新栏里不再复制一份） */
+.card-bar-title {
+  margin: 0;
+  font-size: calc(var(--p-font) + 2px);
+  font-weight: 600;
+}
+
 .panes {
   display: flex;
   flex: 1;
@@ -102,7 +118,7 @@
   color: var(--color-text-secondary);
 }
 
-/* 侧栏导航项（分类、受管文件夹共用） */
+/* 侧栏导航项（分类、收藏和盘符共用） */
 .nav-item {
   display: flex;
   align-items: center;

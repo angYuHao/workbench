@@ -17,7 +17,7 @@ pub use organize::{organize_desktop, revert_organize};
 pub use rules::save_rule_with_rename;
 pub use scan::scan_desktop;
 
-pub(crate) use icons::{extension_of, extract_icon, get_icon_dir, launch_target};
+pub(crate) use icons::{extension_of, extract_icon, fnv1a, get_icon_dir, launch_target};
 
 mod apps;
 mod icons;

@@ -19,5 +19,5 @@ pub use ai::{
 pub use bookmarks::{Bookmark, ImportResult};
 pub use common::Category;
 pub use desktop::{AppEntry, DesktopItem, DesktopRule, OrganizeLog, OrganizePlan};
-pub use files::{FileNode, FileRecord, ReadTextResult};
+pub use files::{ClipboardFiles, DriveInfo, FileNode, FileRecord, KnownFolder, ReadTextResult};
 pub use totp::{TotpAccount, TotpAccountInput};

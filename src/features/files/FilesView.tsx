@@ -1,73 +1,123 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowUp, FileText, Folder, FolderOpen, Pencil, Plus, Trash2 } from "lucide-react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { Fragment, useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { Columns2, Eye, Folder, HardDrive, Pin, Server, X } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { useFilesStore } from "../../stores/files";
+import FileHeader from "./FileHeader";
+import FilePanel from "./FilePanel";
 import PreviewPanel from "./PreviewPanel";
-import useSplitter from "./useSplitter";
-import { openPath } from "../../api/shell";
-import { Button, Form, FormItem, Input, Modal, SearchBox, Table, TextArea, message, pressable, useForm } from "../../ui";
+import useSplitter, { useColumnResize } from "./useSplitter";
+import { formatBytes } from "../../utils/humanize";
+import { folderName } from "../../utils/paths";
+import { Button, Form, FormItem, Input, Modal, Switch, TextArea, message, pressable, useForm } from "../../ui";
 import type { FileNode } from "../../types";
 
-/** 文件栏的地板：缩到这里就顶住，分栏再也拖不动（溢出交给 flex，不出横向滚动条） */
-const LIST_MIN_WIDTH = 240;
-
-/** 目录名：取路径最后一段 */
-function folderName(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? path;
-}
-
-/** 父目录路径，已在受管根目录时返回 null */
-function parentOf(path: string, roots: string[]): string | null {
-  if (roots.includes(path)) return null;
-  const parent = path.replace(/[\\/][^\\/]*$/, "");
-  return parent && parent !== path ? parent : null;
+/** 侧栏一行：点它是在当前栏打开，双击是另开一个标签 */
+function SideItem({
+  path,
+  label,
+  hint,
+  icon,
+  iconPath,
+  active,
+  onOpen,
+  onNewTab,
+  onRemove,
+}: {
+  path: string;
+  label: string;
+  hint?: string;
+  icon: ReactNode;
+  iconPath?: string;
+  active: boolean;
+  onOpen: (path: string) => void;
+  onNewTab: (path: string) => void;
+  onRemove?: (path: string) => void;
+}) {
+  return (
+    <div
+      className={active ? "nav-item active" : "nav-item"}
+      title={hint ? `${label}\n${hint}` : path}
+      onClick={() => onOpen(path)}
+      {...pressable(() => onOpen(path))}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onNewTab(path);
+      }}
+    >
+      {iconPath ? (
+        <img className="file-icon" src={convertFileSrc(iconPath)} alt="" draggable={false} />
+      ) : (
+        icon
+      )}
+      <span className="ellipsis" style={{ flex: 1 }}>
+        {label}
+      </span>
+      {onRemove && (
+        <X
+          className="icon-button"
+          size={13}
+          aria-label={`从收藏里移除「${label}」`}
+          {...pressable(() => onRemove(path))}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(path);
+          }}
+        />
+      )}
+    </div>
+  );
 }
 
 export default function FilesView() {
   const {
-    roots,
-    nodes,
-    currentRoot,
+    drives,
+    knownFolders,
+    pinned,
+    showHidden,
+    panels,
+    activePanelId,
+    icons,
     record,
     preview,
-    loadRoots,
-    addRoot,
-    removeRoot,
-    loadNodes,
-    select,
+    authorizedFor,
+    clipboard,
+    boot,
+    enter,
+    openTab,
+    addPanel,
+    activatePanel,
+    setPanelWidth,
+    togglePin,
+    toggleShowHidden,
     saveMeta,
   } = useFilesStore();
-  const [keyword, setKeyword] = useState("");
   const [edit, setEdit] = useState<FileNode | null>(null);
   const [form] = useForm();
-  const { previewWidth, previewRef, startResize } = useSplitter();
+  const { previewWidth, previewRef, startResize: startPreviewResize } = useSplitter();
+  const { register: registerPanel, startResize: startColumnResize } = useColumnResize(setPanelWidth);
 
   useEffect(() => {
-    loadRoots().then((r) => {
-      if (r.length) loadNodes(r[0]);
-    });
+    void boot();
   }, []);
 
   useEffect(() => {
     const subscribed = listen("files-changed", () => {
-      const { currentRoot: root, loadNodes: reload } = useFilesStore.getState();
-      if (root) reload(root);
+      // 磁盘一动，每一栏每一列都重读：只刷当前那列的话，别的列里躺着的还是旧目录
+      void useFilesStore.getState().reloadTabs();
     });
     return () => {
       subscribed.then((unlisten) => unlisten());
     };
   }, []);
 
-  const handleAddFolder = async () => {
-    try {
-      const selected = await openDialog({ directory: true, multiple: false });
-      if (typeof selected === "string") await addRoot(selected);
-    } catch (e) {
-      message.error(String(e));
-    }
-  };
+  /** 在资源管理器 / Outlook 里拷完再切回来，状态条和右键菜单里的「粘贴」得立刻跟着变 */
+  useEffect(() => {
+    const sync = () => void useFilesStore.getState().syncClipboard();
+    window.addEventListener("focus", sync);
+    return () => window.removeEventListener("focus", sync);
+  }, []);
 
   useEffect(() => {
     if (!edit) {
@@ -93,171 +143,196 @@ export default function FilesView() {
     }
   };
 
-  const visible = useMemo(() => {
-    const k = keyword.toLowerCase();
-    if (!k) return nodes;
-    return nodes.filter(
-      (n) =>
-        n.name.toLowerCase().includes(k) ||
-        (n.alias ?? "").toLowerCase().includes(k) ||
-        (n.description ?? "").toLowerCase().includes(k),
-    );
-  }, [nodes, keyword]);
+  /** 预览跟着「当前栏、当前标签、当前列单选的那一项」走：点别的列会先把焦点挪过去 */
+  const activePanel = panels.find((p) => p.id === activePanelId) ?? null;
+  const activeTab = activePanel?.tabs.find((t) => t.id === activePanel.activeTabId) ?? null;
+  const activeCol = activeTab
+    ? activeTab.cols[Math.min(Math.max(activeTab.focus, 0), activeTab.cols.length - 1)]
+    : null;
+  const selectedNode: FileNode | null =
+    activeCol?.selected.length === 1
+      ? activeCol.nodes.find((n) => n.path === activeCol.selected[0]) ?? null
+      : null;
+  /** 预览栏只在选中具体文件时弹出来：选目录是「往下翻」的一步，多选也没法只讲一个，都收起 */
+  const previewNode = selectedNode && !selectedNode.isDir ? selectedNode : null;
 
-  const parent = currentRoot ? parentOf(currentRoot, roots) : null;
+  /** 重命名和新建文件夹共用一个输入框弹窗：两者要问的就是一句话 */
+  const [nameEdit, setNameEdit] = useState<{ mode: "new" | "rename" } | null>(null);
+  const [nameValue, setNameValue] = useState("");
 
-  /** 双击和 Enter 都走这里：目录就是进去，文件交给系统程序打开 */
-  const open = (node: FileNode) => {
-    if (node.isDir) {
-      loadNodes(node.path);
+  const openNewFolder = () => {
+    setNameValue("新建文件夹");
+    setNameEdit({ mode: "new" });
+  };
+  const openRename = (node: FileNode) => {
+    setNameValue(node.name);
+    setNameEdit({ mode: "rename" });
+  };
+  const submitName = async () => {
+    const store = useFilesStore.getState();
+    const value = nameValue.trim();
+    if (!value) {
+      message.error("名字没填");
       return;
     }
-    // 打不开现在会报错回来了（文件被删、没有关联程序），不接住就只是控制台里一条红字
-    openPath(node.path).catch((e) => message.error(String(e)));
+    try {
+      if (nameEdit?.mode === "new") await store.createFolderHere(value);
+      else await store.renameSelected(value);
+      setNameEdit(null);
+    } catch (e) {
+      message.error(String(e));
+    }
   };
 
-  const selectedNode: FileNode | null = record
-    ? {
-        name: record.name,
-        path: record.path,
-        isDir: record.isDir,
-        alias: record.alias,
-        description: record.description,
-      }
-    : null;
+  const handlePinCurrent = () => {
+    if (!activeCol) return;
+    const already = pinned.includes(activeCol.path);
+    void togglePin(activeCol.path);
+    message.success(already ? "已从收藏移除" : "已收藏到侧栏");
+  };
+
+  const open = (path: string) => void enter(path);
+  const newTab = (path: string) => void openTab(path);
 
   return (
     <div className="page">
-      <div className="toolbar">
-        <h2 className="toolbar-title">文件管理</h2>
-        <Button icon={<Plus size={16} />} onClick={handleAddFolder}>
-          添加文件夹
-        </Button>
-      </div>
-
       <div className="panes">
-        <div className="side-pane">
-          <div className="label" style={{ padding: "4px 8px" }}>
-            受管文件夹
-          </div>
+        <div className="side-pane files-side">
           <div className="stack">
-            {roots.map((r) => (
-              <div
-                key={r}
-                className={currentRoot === r ? "nav-item active" : "nav-item"}
-                onClick={() => loadNodes(r)}
-                {...pressable(() => loadNodes(r))}
-              >
-                <FolderOpen size={15} />
-                <span className="ellipsis" style={{ flex: 1 }}>
-                  {folderName(r)}
-                </span>
-                <Trash2
-                  className="icon-button"
-                  size={13}
-                  aria-label={`移除受管文件夹「${folderName(r)}」`}
-                  {...pressable(() => removeRoot(r))}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeRoot(r);
-                  }}
-                />
-              </div>
+            {!!pinned.length && <div className="label side-section">收藏</div>}
+            {pinned.map((p) => (
+              <SideItem
+                key={p}
+                path={p}
+                label={folderName(p)}
+                hint={p}
+                icon={<Pin size={15} />}
+                iconPath={icons[p]}
+                active={activeCol?.path === p}
+                onOpen={open}
+                onNewTab={newTab}
+                onRemove={(path) => void togglePin(path)}
+              />
             ))}
-          </div>
-          {roots.length === 0 && <div className="label" style={{ padding: 16 }}>尚未添加受管文件夹</div>}
-        </div>
 
-        <div className="column" style={{ minWidth: LIST_MIN_WIDTH }}>
-          <div className="sub-toolbar">
-            {parent && (
-              <Button size="small" type="text" icon={<ArrowUp size={14} />} onClick={() => loadNodes(parent)}>
-                上级
+            <div className="label side-section">常用</div>
+            {knownFolders.map((k) => (
+              <SideItem
+                key={k.path}
+                path={k.path}
+                label={k.name}
+                hint={k.path}
+                icon={<Folder size={15} />}
+                iconPath={icons[k.path]}
+                active={activeCol?.path === k.path}
+                onOpen={open}
+                onNewTab={newTab}
+              />
+            ))}
+
+            <div className="label side-section">此电脑</div>
+            {drives.map((d) => (
+              <SideItem
+                key={d.path}
+                path={d.path}
+                label={`${d.label ?? d.kind} (${d.letter}:)`}
+                hint={
+                  d.free !== null && d.total !== null
+                    ? `${d.path}\n剩余 ${formatBytes(d.free)} / 共 ${formatBytes(d.total)}`
+                    : d.path
+                }
+                icon={d.kind === "网络驱动器" ? <Server size={15} /> : <HardDrive size={15} />}
+                iconPath={icons[d.path]}
+                active={activeCol?.path === d.path}
+                onOpen={open}
+                onNewTab={newTab}
+              />
+            ))}
+            {!drives.length && <div className="label" style={{ padding: 16 }}>还没读到盘符</div>}
+          </div>
+
+          <div className="side-footer">
+            <div className="side-toggle" title="隐藏和系统项摆不摆出来（.git、desktop.ini 这类）">
+              <Eye size={14} />
+              <span style={{ flex: 1 }}>隐藏项</span>
+              <Switch size="small" checked={showHidden} onChange={(on) => void toggleShowHidden(on)} />
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <Button
+                size="small"
+                type="text"
+                icon={<Pin size={14} />}
+                onClick={handlePinCurrent}
+                disabled={!activeCol}
+                title={pinned.includes(activeCol?.path ?? "") ? "从收藏里移除当前目录" : "把当前目录放进收藏"}
+              >
+                {pinned.includes(activeCol?.path ?? "") ? "取消收藏" : "收藏这里"}
               </Button>
-            )}
-            <span className="ellipsis label" style={{ flex: 1, minWidth: 0 }}>
-              {currentRoot ?? ""}
-            </span>
-            <SearchBox placeholder="搜索名称 / 别名 / 说明" style={{ width: 220, minWidth: 0 }} value={keyword} onChange={setKeyword} />
-          </div>
-          <div className="pane-body" style={{ padding: 8 }}>
-            <Table
-              dataSource={visible}
-              rowKey={(r) => r.path}
-              size="middle"
-              onRow={(node) => ({
-                onClick: () => select(node),
-                onDoubleClick: () => open(node),
-                /** 表格行不套 button 语义，键盘只用 Enter（空格留给以后可能的「勾选」） */
-                ...pressable(() => open(node), { role: null, space: false }),
-              })}
-              rowClassName={(node) => (record?.path === node.path ? "row-selected" : "")}
-              layout="fixed"
-              columns={[
-                {
-                  title: "名称",
-                  dataIndex: "name",
-                  ellipsis: true,
-                  render: (_: unknown, node: FileNode) => (
-                    <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                      {node.isDir ? (
-                        <Folder size={16} style={{ flexShrink: 0 }} color="var(--color-warning)" />
-                      ) : (
-                        <FileText size={16} style={{ flexShrink: 0 }} color="var(--color-text-secondary)" />
-                      )}
-                      <span className="ellipsis" title={node.name}>
-                        {node.name}
-                      </span>
-                    </span>
-                  ),
-                },
-                {
-                  title: "别名",
-                  dataIndex: "alias",
-                  width: "32%",
-                  ellipsis: true,
-                  render: (v: string | null) => <span title={v ?? undefined}>{v ?? "—"}</span>,
-                },
-                {
-                  title: "",
-                  width: 44,
-                  render: (_: unknown, node: FileNode) => (
-                    <Pencil
-                      className="icon-button"
-                      size={15}
-                      aria-label={`编辑「${node.name}」`}
-                      {...pressable(() => setEdit(node))}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEdit(node);
-                      }}
-                      // 这一行双击是「打开」，不拦一下就会在编辑按钮上按两下顺手把文件也开了
-                      onDoubleClick={(e) => e.stopPropagation()}
-                    />
-                  ),
-                },
-              ]}
-            />
+              <Button size="small" type="text" icon={<Columns2 size={14} />} onClick={() => void addPanel()}>
+                新建分栏
+              </Button>
+            </div>
           </div>
         </div>
 
-        <div className="divider-v" onMouseDown={startResize} />
+        <div className="file-main">
+          <FileHeader panel={activePanel} multi={panels.length > 1} />
 
-        <div
-          className="preview-pane"
-          ref={previewRef}
-          style={
-            previewWidth === null
-              ? { flex: "1 1 0", minWidth: 0 }
-              : { flex: "0 1 auto", minWidth: 0, width: previewWidth }
-          }
-        >
-          <PreviewPanel node={selectedNode} record={record} preview={preview} />
+          <div className="file-panes">
+            <div className="file-columns">
+              {panels.map((p, i) => (
+                <Fragment key={p.id}>
+                  {i > 0 && <div className="divider-v" onMouseDown={(e) => startColumnResize(e, panels[i - 1].id)} />}
+                  <FilePanel
+                    panel={p}
+                    active={p.id === activePanelId}
+                    previewOpen={!!previewNode}
+                    pinned={pinned}
+                    clipboard={clipboard}
+                    icons={icons}
+                    onActivate={() => void activatePanel(p.id)}
+                    onEdit={setEdit}
+                    onRename={openRename}
+                    onNewFolder={openNewFolder}
+                    registerRef={registerPanel(p.id)}
+                  />
+                </Fragment>
+              ))}
+              {!panels.length && (
+                <div className="label" style={{ padding: 16 }}>
+                  左边选一个位置，或点「新建分栏」
+                </div>
+              )}
+            </div>
+
+            {previewNode && (
+              <>
+                <div className="divider-v" onMouseDown={startPreviewResize} />
+
+                <div
+                  className="preview-pane"
+                  ref={previewRef}
+                  style={
+                    previewWidth === null
+                      ? { flex: "1 1 0", minWidth: 0 }
+                      : { flex: "0 1 auto", minWidth: 0, width: previewWidth }
+                  }
+                >
+                  <PreviewPanel
+                    node={previewNode}
+                    record={record}
+                    preview={preview}
+                    ready={authorizedFor === previewNode.path}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       <Modal
-        title={`编辑 ${edit ? folderName(edit.path) : ""}`}
+        title={`编辑 ${edit ? edit.name : ""}`}
         open={!!edit}
         onCancel={() => setEdit(null)}
         onOk={handleSaveMeta}
@@ -271,6 +346,27 @@ export default function FilesView() {
             <TextArea autoSize={{ minRows: 3 }} placeholder="记录这个文件的用途、来源等信息" />
           </FormItem>
         </Form>
+      </Modal>
+
+      <Modal
+        title={nameEdit?.mode === "new" ? "新建文件夹" : "重命名"}
+        open={!!nameEdit}
+        onCancel={() => setNameEdit(null)}
+        onOk={() => void submitName()}
+        okText="就这么定"
+      >
+        <Input
+          value={nameValue}
+          onChange={setNameValue}
+          onEnter={() => void submitName()}
+          autoFocus
+          placeholder={nameEdit?.mode === "new" ? "文件夹名字" : "新名字"}
+        />
+        <div className="label" style={{ marginTop: 8, lineHeight: 1.7 }}>
+          {nameEdit?.mode === "new"
+            ? "撞名不覆盖，自动加 (1)(2) 让位。"
+            : "撞名同样让位；别名和说明跟着新名字一起走。"}
+        </div>
       </Modal>
     </div>
   );

@@ -42,14 +42,15 @@ pub fn run() {
         })
         .setup(|app| {
             let state = db::init()?;
-            let folders =
-                services::files::get_managed_folders(&state.conn()).unwrap_or_default();
-            let fw = filewatcher::FileWatcher::new(app.handle().clone(), &folders)?;
+            // 先起一个空监视器：这页开的是整台机器，启动时并不知道用户要看哪几个目录，
+            // 由文件页在切换目录时通过 `watch_folders` 说给它
+            let fw = filewatcher::FileWatcher::new(app.handle().clone(), &[])?;
             *state.watcher.lock().unwrap() = Some(fw);
             app.manage(state);
 
             // 预览要读磁盘上的文件，但 webview 不该因此看见整块盘：静态 scope 是空的，
-            // 这里按「桌面 + 图标缓存 + 受管文件夹」逐条授权到目录级。
+            // 这里按「桌面 + 图标缓存」逐条授权到目录级（桌面页两处都要用）。
+            // 文件页其余的目录是用户点到哪一次，`authorize_preview` 当场授到哪一次。
             // 某条目录还没建好或读不到时不拦启动，用户真要预览它时会拿到明确的读取失败。
             let app_state = app.state::<db::AppState>();
             let conn = app_state.conn();
@@ -122,13 +123,22 @@ pub fn run() {
             commands::bookmarks::save_bookmark,
             commands::bookmarks::delete_bookmark,
             commands::bookmarks::open_url,
-            commands::files::get_managed_folders,
-            commands::files::add_managed_folder,
-            commands::files::remove_managed_folder,
+            commands::files::get_drives,
+            commands::files::get_known_folders,
+            commands::files::authorize_preview,
+            commands::files::get_shell_icons,
+            commands::files::watch_folders,
             commands::files::list_files,
             commands::files::get_file,
             commands::files::save_file_meta,
             commands::files::read_text_file,
+            commands::files::create_folder,
+            commands::files::rename_path,
+            commands::files::delete_paths,
+            commands::files::copy_paths,
+            commands::files::move_paths,
+            commands::files::clipboard_write,
+            commands::files::clipboard_read,
             commands::files::open_path,
             commands::files::reveal_in_explorer,
             commands::categories::get_categories,

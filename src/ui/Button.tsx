@@ -14,6 +14,9 @@ interface ButtonProps {
   children?: React.ReactNode;
   style?: React.CSSProperties;
   className?: string;
+  /** 纯图标按钮的名字：JSX 允许写带连字符的属性，但这里不往下传就丢了，所以显式收进 props */
+  title?: string;
+  "aria-label"?: string;
 }
 
 /** 高度跟着密度档走；内边距和字号是这个控件自己的三档层级，不跟着密度动 */
@@ -34,6 +37,8 @@ export function Button({
   children,
   style,
   className,
+  title,
+  "aria-label": ariaLabel,
 }: ButtonProps) {
   const base: React.CSSProperties = {
     display: "inline-flex",
@@ -78,6 +83,8 @@ export function Button({
       type="button"
       disabled={disabled || loading}
       onClick={onClick}
+      title={title}
+      aria-label={ariaLabel}
       className={className}
       style={{
         ...base,

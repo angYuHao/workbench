@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { SELF, type Domain } from "../api/notify";
 import { CACHE_KEY, replayCache } from "../styles/apply";
+import { useAppearanceStore } from "./appearance";
 import { useBookmarksStore } from "./bookmarks";
 import { useDesktopStore } from "./desktop";
 import { useFilesStore } from "./files";
@@ -9,12 +10,9 @@ import { useTotpStore } from "./totp";
 
 type Reload = () => Promise<void>;
 
-/** 文件页特殊：受管目录可能整个被别的窗口加掉了，先看根列表再决定重读哪一栏 */
+/** 文件页浏览的是整台机器，没有「哪些目录算我的」这层名单了：脏了就把几个标签停着的目录重读一遍 */
 async function reloadFiles(): Promise<void> {
-  const s = useFilesStore.getState();
-  const roots = await s.loadRoots();
-  const root = s.currentRoot && roots.includes(s.currentRoot) ? s.currentRoot : roots[0];
-  if (root) await s.loadNodes(root);
+  await useFilesStore.getState().reloadTabs();
 }
 
 /** 域 → 该重读哪些 store。全部复用各 store 现成的 load*，这里不写任何取数逻辑。
@@ -28,7 +26,7 @@ const LOADERS: Record<Domain, Reload[]> = {
   files: [reloadFiles],
   restore: [async () => window.location.reload()],
   rules: [() => useSettingsStore.getState().loadRules()],
-  settings: [() => useSettingsStore.getState().loadLocalPrefs()],
+  settings: [() => useSettingsStore.getState().loadLocalPrefs(), () => useAppearanceStore.getState().syncZoom()],
   totp: [() => useTotpStore.getState().load()],
   /** 使用次数：主窗口的列表不为此重排（每开一个网页就重读整张表是白工），
    *  盯它的是顶边那条抽屉，见 features/drawer/DrawerStrip.tsx。
@@ -40,8 +38,9 @@ const LOADERS: Record<Domain, Reload[]> = {
  * 订阅别的窗口的写入。每个窗口各有一份 store、各有一个监听，所以不需要「共享状态」这种东西：
  * 库是唯一真相，窗口里全是缓存视图，跨窗口只传「哪块脏了」。
  *
- * 外观不走这条总线 —— 它已经有 localStorage 镜像，同源窗口之间的 `storage` 事件天生只通知
- * 别的窗口不通知自己，比绕一圈 IPC 更准也更省。
+ * 外观的 token 不走这条总线 —— 它已经有 localStorage 镜像，同源窗口之间的 `storage` 事件天生只通知
+ * 别的窗口不通知自己，比绕一圈 IPC 更准也更省。**缩放是唯一的例外**：它是 webview 的属性、不在
+ * token 里，而镜像回调里绝不能再写一次镜像（会把两个窗口写成无限往返），所以它只能走这条总线。
  */
 export function startSync(): () => void {
   const pending = new Set<Domain>();

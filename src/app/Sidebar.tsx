@@ -5,8 +5,6 @@ import { useAppearanceStore } from "../stores/appearance";
 import { resolveMode } from "../styles/apply";
 import { Tooltip, pressable } from "../ui";
 import SettingsModal from "../features/settings/SettingsModal";
-// 侧栏顶部就用产品图标本身，不再另画一个字母标记：换图标时只换一处
-import appIcon from "../../src-tauri/icons/128x128.png";
 
 const NAV_ITEMS = [
   { to: "/", icon: AppWindow, label: "应用" },
@@ -27,9 +25,6 @@ export default function Sidebar() {
 
   return (
     <div className="sidebar">
-      <Tooltip title="个人工作台" placement="right">
-        <img className="sidebar-logo" src={appIcon} alt="个人工作台" draggable={false} />
-      </Tooltip>
       {NAV_ITEMS.map(({ to, icon: Icon, label }) => {
         const active = to === "/" ? pathname === "/" : pathname.startsWith(to);
         return (

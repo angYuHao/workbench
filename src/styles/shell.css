@@ -1,3 +1,73 @@
+/* ---- 外壳：标题栏一条，下面才是侧栏 + 内容两栏 ---- */
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- 自绘标题栏（原生装饰关掉之后，这一条是唯一的拖动区）---- */
+.title-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  justify-content: space-between;
+  height: calc(var(--p-ctrl-h) + 2px);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--p-font);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tb-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: var(--p-pad);
+  line-height: 1;
+}
+
+.tb-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.tb-actions {
+  display: flex;
+  align-items: stretch;
+}
+
+/* 窗口按钮跟系统的观感一致：不画成可点的文字指针，悬停才出现一块底 */
+.tb-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  border: 0;
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: default;
+}
+
+.tb-btn:hover {
+  background: var(--color-hover-sunken);
+  color: var(--color-text);
+}
+
+/* 只有关闭那颗用危险色 —— 系统的红色语义就落在这一颗上，别三颗一起红 */
+.tb-btn.close:hover {
+  background: var(--color-danger-solid);
+  color: var(--color-danger-fg);
+}
+
 /* ---- 侧边导航 ---- */
 .sidebar {
   display: flex;
@@ -8,18 +78,6 @@
   width: 64px;
   padding-top: var(--p-pad);
   background: var(--color-sidebar);
-}
-
-.sidebar-logo {
-  width: 36px;
-  height: 36px;
-  margin-bottom: 12px;
-  border-radius: 8px;
-  object-fit: contain;
-  flex-shrink: 0;
-  /** 图标自己带圆角、外角是透明的，所以这里不能再铺品牌色底：
-      底色会从透明角漏出来，看着像一个方框套着圆角图标 */
-  background: none;
 }
 
 .nav-button {
@@ -77,6 +135,117 @@
   font-size: 13px;
 }
 
+/* 文件页右半边：表头一条横跨到底（含预览栏上方），下面才是「几栏 + 预览」那一行。
+   表头不跟着某一栏走，所以地址栏和标签栏的宽度到这里为止，不再被预览栏切一刀 */
+.file-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.file-panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 表头自己就是一条：地址栏一行、标签栏一行，两行各自带下边框 */
+.file-header .sub-toolbar {
+  padding: 6px 10px;
+}
+
+/* 地址栏：资源管理器那种逐层可点的面包屑。平时不画边框，鼠标进来才浮出一层底 */
+.crumb-bar {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 4px;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  cursor: text;
+}
+
+.crumb-bar:hover,
+.crumb-bar-editing {
+  background: var(--color-sunken);
+}
+
+.crumb {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 240px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 4px);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.crumb:hover {
+  background: var(--color-card);
+  color: var(--color-primary-text);
+}
+
+/* 当前这一层：不可点，加粗，跟上面几层分开 */
+.crumb-here {
+  color: var(--color-text);
+  font-weight: 600;
+  cursor: default;
+}
+
+.crumb-here:hover {
+  background: none;
+  color: var(--color-text);
+}
+
+.crumb-sep {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+/* 地址栏最左边那个小文件夹，跟资源管理器一样当「这里是哪」的记号 */
+.crumb-lead {
+  flex-shrink: 0;
+  margin-right: 2px;
+  color: var(--color-warning);
+}
+
+/* 放不下时长的那几层先缩，当前这一层尽量把名字留全 */
+.crumb:not(.crumb-here) {
+  flex-shrink: 3;
+}
+
+.crumb-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--color-primary);
+  border-radius: calc(var(--radius-control) - 4px);
+  background: var(--color-card);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+/* 输入状态让边框顶到整条，不再叠一层内边距 */
+.crumb-bar-editing {
+  padding: 0;
+  overflow: visible;
+}
+
 .pane-body {
   flex: 1;
   overflow: auto;
@@ -86,5 +255,301 @@
 .preview-pane {
   flex-shrink: 0;
   overflow: auto;
+}
+
+/* 侧栏里那三节的小标题：收藏 / 常用 / 此电脑 */
+.side-section {
+  padding: 10px 8px 2px;
+}
+
+/* 几栏并排占掉侧栏和预览栏之间的地方；栏宽由 .file-panel 上的内联 style 给，
+   没拖过分栏的就是 1 1 0（等分），拖过的按像素走但仍允许被 flex 夹短。
+   预览栏记的是上次拖出来的像素宽，窗口变小或那个宽度太大时，这里用 400 的底兜住——
+   不然文件栏会被压成一条缝，标签、工具栏全挤成竖排 */
+.file-columns {
+  display: flex;
+  flex: 1 1 400px;
+  min-width: 400px;
+  /* 分栏多到这一块放不下时横向滚，别让右边那栏被压到预览栏底下去 */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.file-panel {
+  position: relative;
+}
+
+/* 当前栏：描一条主色细边。给整栏染色会把选中行的底色吃掉，所以只描边 */
+.file-panel.active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--color-primary-faint);
+  pointer-events: none;
+}
+
+/* 表头第二行：当前栏开着的几个文件夹。标签多了这一条自己横滚，右边的几个按钮不跟着滚走 */
+.file-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.file-tabs > .icon-button {
+  flex-shrink: 0;
+}
+
+/* 视图切换、重读、关栏这三颗顶到最右，跟左边的标签隔开 */
+.file-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.file-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 160px;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.file-tab:hover {
+  background: var(--color-hover-sunken);
+}
+
+.file-tab.active {
+  background: var(--color-card);
+  border-color: var(--color-border);
+  color: var(--color-primary-text);
+  font-weight: 600;
+}
+
+.file-tab-close {
+  flex-shrink: 0;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.file-tab-close:hover {
+  opacity: 1;
+}
+
+/* 开了「隐藏项」才摆出来的那些：看得见，但一眼能看出不是常规项 */
+.row-hidden-item {
+  color: var(--color-text-muted);
+}
+
+/* ---- Miller 列：一个标签里从根目录开始向右排开的一串目录 ---- */
+.miller {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* 列数少时每列均分整栏；多到放不下就按 220 的底线横向滚动 */
+.miller-col {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 220px;
+  min-width: 220px;
+  min-height: 0;
+  border-right: 1px solid var(--color-border);
+}
+
+.miller-col:last-child {
+  border-right: none;
+}
+
+/* 焦点列底色亮一档：键盘和右键都作用于这一列，得看得出是哪一列 */
+.miller-col.focused {
+  background: var(--color-card);
+}
+
+.miller-body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+
+.miller-empty,
+.miller-error {
+  padding: 10px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.miller-error {
+  color: var(--color-danger-text);
+  word-break: break-all;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.file-row:hover {
+  background: var(--color-hover-sunken);
+}
+
+.file-row.row-selected {
+  background: var(--color-primary-faint);
+  color: var(--color-primary-text);
+}
+
+.file-icon-slot {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+/* 系统画出来的图标是 32px 的 png，摆进 16px 的格子里按比例缩 */
+.file-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.file-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.file-row-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.file-row-name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.file-row-alias {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.file-row-meta {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+/* 每行右边那支笔：平时不占视觉，悬停或键盘聚焦时才露出来 */
+.row-edit {
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.file-row:hover .row-edit,
+.row-edit:focus-visible {
+  opacity: 1;
+}
+
+/* 文件页侧栏：上面几节自己滚，隐藏项/收藏/分栏那几颗钉在底下 */
+.files-side {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.files-side .stack {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.side-footer {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.side-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+/* 每栏底下那一条：几项、选了几项、剪贴板里躺着什么、这个盘还剩多少 */
+.file-status {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 10px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.file-status-right {
+  margin-left: auto;
+}
+
+/* 表头点着排序：给指针、别让拖出文字选区 */
+.th-sort {
+  cursor: pointer;
+  user-select: none;
+}
+
+.th-sort:hover {
+  color: var(--color-primary-text);
+}
+
+.th-arrow {
+  margin-left: 2px;
+  color: var(--color-primary-text);
+}
+
+/* 大小和时间右对齐，比长短时才看得出长短 */
+.file-num {
+  display: block;
+  text-align: right;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
