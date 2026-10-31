@@ -71,7 +71,7 @@ grep -c 'commands::' src/lib.rs
 - **CSP 只作用在 Tauri 自己 serve 的那份 html 上**（`manager/mod.rs` 的 `is_html` 闸门，作为响应头下发）。`tauri dev` 的页面来自 vite（`devUrl`），**不吃这份 CSP**，所以改完必须用打包出来的 exe 验，别在 dev 窗口里以为没事了。Tauri 会自己往 `script-src`/`style-src` 里补它注入脚本的 hash，不用手加。
 - 每条 directive 都有具体东西依赖：`convertFileSrc` 在 Windows 上出的是 `http://asset.localhost/<编码路径>`，所以 `img-src`/`frame-src`/`connect-src` 三个都要同时写 `asset:` 和 `http://asset.localhost`（前者给别的平台，后者给本机 WebView2）；`style-src 'unsafe-inline'` 是 React 那一大堆内联 `style=` 必需的，去掉就整体没样式；`connect-src ipc: http://ipc.localhost` 照 Tauri 配置文档的示例留着。书签页的 favicon 走 `https://www.google.com/s2/favicons`，是唯一一个远程图片源。
 - **asset scope 静态是空的**，运行时两层授权：启动时 `services::files::preview_roots()` 只摆两个桌面根（`win::desktop::all_desktops()`）+ 图标缓存目录，在 `lib.rs` 的 setup 里逐条 `allow_directory(root, true)`；文件页浏览的是整台机器，其余目录**点到才给**——`commands::files::authorize_preview` 在前端真要预览某个文件时 `allow_file(那一个) + allow_directory(它所在目录, 不递归)`，同目录的相对路径图片因此也能读，没点开的盘面 webview 摸不到。授权**撤不回**：scope 只有 `allow_*` 和会永久压住后续允许的 `forbid_*`，所以只记这次会话里看过哪些目录，下次启动自然清零。列目录不受这层管（`list_files` 在后端直接 `read_dir`，任何路径都能列，含隐藏项由界面那个开关决定摆不摆）。
-- 磁盘监视器盯的是「界面正在看的那几个目录」：`commands::files::watch_folders` 由文件页在切栏/切标签时按当前几个标签停着的目录报上来（去重、攒一下），启动时先起一个空的。不再有一张「受管文件夹」名单。
+- 磁盘监视器盯的是「界面正在看的那几个目录」：`commands::files::watch_folders` 由文件页在切栏/切标签时报到后端（去重、攒一下），只报**每栏当前标签**的那串列——后台标签不读盘也不监视，切过去时前端自己补读；启动时先起一个空的。监视是增量的（只加/减变动的目录）、只看第一层，标签多时也不会因为一次重报就把整套监视拆了重建。不再有一张「受管文件夹」名单。
 - 预览不受信文件靠三层叠加：`rehype-sanitize`（md 里的原始 HTML）、iframe `sandbox="allow-same-origin"`（.html，不放行脚本）、上面那份 CSP（内联脚本和远程脚本都执行不了）。
 
 ## 顶边抽屉（平时藏着，鼠标顶到屏幕上沿出来）

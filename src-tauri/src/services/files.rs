@@ -238,6 +238,18 @@ pub fn read_text_file(path: &str) -> AppResult<ReadTextResult> {
     })
 }
 
+/// 文本预览要的只是开头那一段原始字节，所以由这里直接读盘，不让 asset 协议去碰整个文件。
+/// asset 协议的响应是先整份读进内存再包成 `SHCreateMemStream`，长度放不进 u32 时
+/// wry 里那个 `u32::try_from(len).unwrap()` 会 panic，进程直接 abort。
+/// 多读一个字节：调用方靠它判断后面还有没有。
+pub fn read_file_head(path: &str, limit: u64) -> AppResult<Vec<u8>> {
+    let mut buf = Vec::new();
+    std::fs::File::open(path)?
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
 // ---------------- 写盘的那几个动作 ----------------
 
 fn split_ext(name: &str) -> (String, String) {
@@ -389,12 +401,13 @@ pub fn delete_paths(conn: &Connection, paths: &[String], to_trash: bool) -> AppR
     Ok(paths.len())
 }
 
-/// 拷进某个目录。同名让位，返回条数。拷贝出来的那份**不带**别名和说明——
-/// 那些话是讲给原件的，刚生出来的副本还没什么可交代的
-pub fn copy_into(paths: &[String], dest_dir: &str) -> AppResult<usize> {
+/// 拷进某个目录。同名让位，返回拷贝落地的路径（撤销粘贴要照着删）。
+/// 拷贝出来的那份**不带**别名和说明——那些话是讲给原件的，刚生出来的副本还没什么可交代的
+pub fn copy_into(paths: &[String], dest_dir: &str) -> AppResult<Vec<String>> {
     for p in paths {
         check_not_inside(p, dest_dir)?;
     }
+    let mut created = Vec::with_capacity(paths.len());
     for p in paths {
         let src = Path::new(p);
         let name = src
@@ -406,15 +419,17 @@ pub fn copy_into(paths: &[String], dest_dir: &str) -> AppResult<usize> {
         } else {
             std::fs::copy(src, &target)?;
         }
+        created.push(target.to_string_lossy().to_string());
     }
-    Ok(paths.len())
+    Ok(created)
 }
 
-/// 搬进某个目录。跨盘的 move 系统会失败，那就先拷再删源
-pub fn move_into(conn: &Connection, paths: &[String], dest_dir: &str) -> AppResult<usize> {
+/// 搬进某个目录。跨盘的 move 系统会失败，那就先拷再删源。返回落地后的路径
+pub fn move_into(conn: &Connection, paths: &[String], dest_dir: &str) -> AppResult<Vec<String>> {
     for p in paths {
         check_not_inside(p, dest_dir)?;
     }
+    let mut created = Vec::with_capacity(paths.len());
     for p in paths {
         let src = Path::new(p);
         let name = src
@@ -445,8 +460,9 @@ pub fn move_into(conn: &Connection, paths: &[String], dest_dir: &str) -> AppResu
             // 跨盘搬的那份不带标注：跟复制一个口径，源那边连同行一起摘掉
             drop_meta(conn, p)?;
         }
+        created.push(to);
     }
-    Ok(paths.len())
+    Ok(created)
 }
 
 #[cfg(test)]
@@ -608,9 +624,13 @@ mod tests {
         save_file_meta(&c, &from, Some("甲".into()), None).unwrap();
         let dest = dir.join("乙").to_string_lossy().to_string();
 
-        assert_eq!(move_into(&c, std::slice::from_ref(&from), &dest).unwrap(), 1);
-        assert!(!Path::new(&from).exists(), "源要摘掉");
         let landed = dir.join("乙").join("a.txt").to_string_lossy().to_string();
+        assert_eq!(
+            move_into(&c, std::slice::from_ref(&from), &dest).unwrap(),
+            vec![landed.clone()],
+            "回的是落地后的路径"
+        );
+        assert!(!Path::new(&from).exists(), "源要摘掉");
         assert_eq!(get_file(&c, &landed).unwrap().alias.as_deref(), Some("甲"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -669,6 +689,19 @@ mod tests {
         let rec = get_file(&c, &p).unwrap();
         assert_eq!(rec.alias.as_deref(), Some("第二版"));
         assert_eq!(rec.name, "b.md");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_head_read_stops_one_byte_past_the_limit() {
+        let dir = sandbox("head");
+        let f = dir.join("big.log");
+        std::fs::write(&f, b"0123456789").unwrap();
+        let p = f.to_string_lossy().to_string();
+
+        assert_eq!(read_file_head(&p, 4).unwrap().len(), 5, "多读的那一个字节是给前端判断截断用的");
+        assert_eq!(read_file_head(&p, 10).unwrap().len(), 10, "整份装得下就一个字节都不多读");
+        assert!(read_file_head(&dir.join("nope").to_string_lossy(), 4).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -6,14 +6,18 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { useFilesStore } from "../../stores/files";
 import FileHeader from "./FileHeader";
 import FilePanel from "./FilePanel";
+import { EmptyPanelTabs } from "./PanelTabs";
 import PreviewPanel from "./PreviewPanel";
 import useSplitter, { useColumnResize } from "./useSplitter";
+import useFileActions from "./useFileActions";
+import { canDropInto, dropInto, dropMode } from "./dnd";
 import { formatBytes } from "../../utils/humanize";
 import { folderName } from "../../utils/paths";
 import { Button, Form, FormItem, Input, Modal, Switch, TextArea, message, pressable, useForm } from "../../ui";
 import type { FileNode } from "../../types";
 
-/** 侧栏一行：点它是在当前栏打开，双击是另开一个标签 */
+/** 侧栏一行：点它就是在当前标签里换过去，和地址栏面包屑一样，不叠新标签。
+    要另开一个标签走标签条上的 `+`，或者把文件夹拖到标签条上 */
 function SideItem({
   path,
   label,
@@ -22,7 +26,6 @@ function SideItem({
   iconPath,
   active,
   onOpen,
-  onNewTab,
   onRemove,
 }: {
   path: string;
@@ -32,18 +35,41 @@ function SideItem({
   iconPath?: string;
   active: boolean;
   onOpen: (path: string) => void;
-  onNewTab: (path: string) => void;
   onRemove?: (path: string) => void;
 }) {
+  /** 从列表里拖出来的文件可以直接放到侧栏这几个位置：收藏、常用、盘符 */
+  const dragFiles = useFilesStore((s) => s.dragFiles);
+  const [over, setOver] = useState(false);
+  const dropping = over && !!dragFiles && canDropInto(dragFiles.paths, path);
+
+  useEffect(() => {
+    if (!dragFiles) setOver(false);
+  }, [dragFiles]);
+
   return (
     <div
-      className={active ? "nav-item active" : "nav-item"}
+      className={["nav-item", active ? "active" : "", dropping ? "drop-target" : ""].filter(Boolean).join(" ")}
       title={hint ? `${label}\n${hint}` : path}
       onClick={() => onOpen(path)}
       {...pressable(() => onOpen(path))}
-      onDoubleClick={(e) => {
+      onDragOver={(e) => {
+        const d = useFilesStore.getState().dragFiles;
+        if (!d || !canDropInto(d.paths, path)) return;
+        e.preventDefault();
         e.stopPropagation();
-        onNewTab(path);
+        e.dataTransfer.dropEffect = dropMode(d.sourceDir, path, e);
+        if (!over) setOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setOver(false);
+      }}
+      onDrop={(e) => {
+        if (!useFilesStore.getState().dragFiles) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setOver(false);
+        void dropInto(path, e);
       }}
     >
       {iconPath ? (
@@ -85,7 +111,6 @@ export default function FilesView() {
     clipboard,
     boot,
     enter,
-    openTab,
     addPanel,
     activatePanel,
     setPanelWidth,
@@ -97,17 +122,23 @@ export default function FilesView() {
   const [form] = useForm();
   const { previewWidth, previewRef, startResize: startPreviewResize } = useSplitter();
   const { register: registerPanel, startResize: startColumnResize } = useColumnResize(setPanelWidth);
+  const actions = useFileActions();
 
   useEffect(() => {
     void boot();
   }, []);
 
   useEffect(() => {
+    let timer: number | undefined;
     const subscribed = listen("files-changed", () => {
-      // 磁盘一动，每一栏每一列都重读：只刷当前那列的话，别的列里躺着的还是旧目录
-      void useFilesStore.getState().reloadTabs();
+      /** 拷一个大文件夹会连着炸出几十条事件，攒一小会儿再读；重读本身也只碰当前看得见的标签 */
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        void useFilesStore.getState().reloadTabs();
+      }, 250);
     });
     return () => {
+      window.clearTimeout(timer);
       subscribed.then((unlisten) => unlisten());
     };
   }, []);
@@ -117,6 +148,32 @@ export default function FilesView() {
     const sync = () => void useFilesStore.getState().syncClipboard();
     window.addEventListener("focus", sync);
     return () => window.removeEventListener("focus", sync);
+  }, []);
+
+  /** 快捷键挂在页面上而不是某一行上：点过侧栏、表头之后焦点不在文件列表里，
+      Ctrl+Z / Ctrl+V 也照样管用。输入框、弹窗里不抢，文件列表自己接过的也不重复执行 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      if (e.defaultPrevented) return;
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        e.preventDefault();
+        void actions.undo();
+      } else if (key === "v") {
+        e.preventDefault();
+        if (!useFilesStore.getState().activePanelId) {
+          message.info("先打开一个文件夹，再粘贴");
+          return;
+        }
+        void actions.paste();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   useEffect(() => {
@@ -192,7 +249,6 @@ export default function FilesView() {
   };
 
   const open = (path: string) => void enter(path);
-  const newTab = (path: string) => void openTab(path);
 
   return (
     <div className="page">
@@ -210,7 +266,6 @@ export default function FilesView() {
                 iconPath={icons[p]}
                 active={activeCol?.path === p}
                 onOpen={open}
-                onNewTab={newTab}
                 onRemove={(path) => void togglePin(path)}
               />
             ))}
@@ -226,7 +281,6 @@ export default function FilesView() {
                 iconPath={icons[k.path]}
                 active={activeCol?.path === k.path}
                 onOpen={open}
-                onNewTab={newTab}
               />
             ))}
 
@@ -245,7 +299,6 @@ export default function FilesView() {
                 iconPath={icons[d.path]}
                 active={activeCol?.path === d.path}
                 onOpen={open}
-                onNewTab={newTab}
               />
             ))}
             {!drives.length && <div className="label" style={{ padding: 16 }}>还没读到盘符</div>}
@@ -276,7 +329,8 @@ export default function FilesView() {
         </div>
 
         <div className="file-main">
-          <FileHeader panel={activePanel} multi={panels.length > 1} />
+          <FileHeader panel={activePanel} />
+          {!panels.length && <EmptyPanelTabs />}
 
           <div className="file-panes">
             <div className="file-columns">

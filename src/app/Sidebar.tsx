@@ -7,9 +7,9 @@ import { Tooltip, pressable } from "../ui";
 import SettingsModal from "../features/settings/SettingsModal";
 
 const NAV_ITEMS = [
-  { to: "/", icon: AppWindow, label: "应用" },
-  { to: "/bookmarks", icon: Globe, label: "网页管理" },
-  { to: "/files", icon: FolderKanban, label: "文件管理" },
+  { to: "/", icon: FolderKanban, label: "文件" },
+  { to: "/apps", icon: AppWindow, label: "应用" },
+  { to: "/bookmarks", icon: Globe, label: "网页" },
   { to: "/tools", icon: Puzzle, label: "工具" },
 ];
 

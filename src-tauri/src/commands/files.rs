@@ -82,6 +82,15 @@ pub fn read_text_file(path: String) -> Result<ReadTextResult, String> {
     crate::services::files::read_text_file(&path).map_err(|e| e.to_string())
 }
 
+/// 文本预览读开头的原始字节。走 IPC 不走 asset 协议：后者会把整份文件读进内存，
+/// 一个几 GB 的日志就能让 wry 在装响应时溢出 u32 直接崩掉进程。
+/// 回 `Response` 是为了原样把字节交给前端（前端还要自己嗅探 GBK/UTF-16）
+#[tauri::command]
+pub fn read_file_head(path: String, limit: u32) -> Result<tauri::ipc::Response, String> {
+    let bytes = crate::services::files::read_file_head(&path, limit as u64).map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// 新建文件夹。只动磁盘不动库，所以前端用 invoke 不用 write
 #[tauri::command]
 pub fn create_folder(parent: String, name: String) -> Result<String, String> {
@@ -102,15 +111,15 @@ pub fn delete_paths(state: State<AppState>, paths: Vec<String>, to_trash: bool) 
     crate::services::files::delete_paths(&conn, &paths, to_trash).map_err(|e| e.to_string())
 }
 
-/// 拷进某个目录。只动磁盘
+/// 拷进某个目录。只动磁盘。回的是新落地的路径，撤销粘贴照着删
 #[tauri::command]
-pub fn copy_paths(paths: Vec<String>, dest: String) -> Result<usize, String> {
+pub fn copy_paths(paths: Vec<String>, dest: String) -> Result<Vec<String>, String> {
     crate::services::files::copy_into(&paths, &dest).map_err(|e| e.to_string())
 }
 
-/// 搬进某个目录。标注跟着走，算改了库
+/// 搬进某个目录。标注跟着走，算改了库。回的是新落地的路径，撤销时再搬回去
 #[tauri::command]
-pub fn move_paths(state: State<AppState>, paths: Vec<String>, dest: String) -> Result<usize, String> {
+pub fn move_paths(state: State<AppState>, paths: Vec<String>, dest: String) -> Result<Vec<String>, String> {
     let conn = state.conn();
     crate::services::files::move_into(&conn, &paths, &dest).map_err(|e| e.to_string())
 }

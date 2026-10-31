@@ -132,6 +132,7 @@ pub fn run() {
             commands::files::get_file,
             commands::files::save_file_meta,
             commands::files::read_text_file,
+            commands::files::read_file_head,
             commands::files::create_folder,
             commands::files::rename_path,
             commands::files::delete_paths,

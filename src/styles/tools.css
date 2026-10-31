@@ -33,6 +33,12 @@
 }
 
 /* ---- 桌面整理工具 ---- */
+/* 左树单独铺卡片白，跟右边内容区连成一片（其他页的侧栏仍用主题底色） */
+.org-side {
+  background: var(--color-card);
+}
+
+
 /* 状态 chip：小计数用。底色是中性条纹而不是主色浅底 —— 主色字压在 primary-faint 上只有 4.17:1 */
 .chip {
   display: inline-block;

@@ -169,7 +169,7 @@ export default function DesktopOrganizeTool({ onBack }: ToolProps) {
       </div>
 
       <div className="panes">
-        <div className="side-pane">
+        <div className="side-pane org-side">
           <div className="stack">
             <CatRow label="全部" count={items.length} active={activeCat === null} onClick={() => setActiveCat(null)} />
             {catRows.map((c) => (

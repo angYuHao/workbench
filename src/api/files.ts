@@ -47,6 +47,20 @@ export function readTextFile(path: string) {
   return invoke<ReadTextResult>("read_text_file", { path });
 }
 
+/** 文本预览读开头的原始字节。不走 asset 协议：它会把整份文件读进内存，
+    一个几 GB 的日志就可能让 wry 装响应时溢出 u32 把进程带走。
+    后端多读一个字节，这里靠它判断后面还有没有 */
+export async function readFileHead(
+  path: string,
+  limit: number,
+): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+  const buf = await invoke<ArrayBuffer>("read_file_head", { path, limit });
+  const all = new Uint8Array(buf);
+  return all.byteLength > limit
+    ? { bytes: all.subarray(0, limit), truncated: true }
+    : { bytes: all, truncated: false };
+}
+
 /** 新建文件夹。同名自己让位，返回真正建出来的那个路径 */
 export function createFolder(parent: string, name: string) {
   return invoke<string>("create_folder", { parent, name });
@@ -62,14 +76,14 @@ export function deletePaths(paths: string[], toTrash: boolean) {
   return write<number>("delete_paths", "files", { paths, toTrash });
 }
 
-/** 拷进某个目录。只动磁盘，不碰库 */
+/** 拷进某个目录。只动磁盘，不碰库。回的是新落地的路径，撤销粘贴照着删 */
 export function copyPaths(paths: string[], dest: string) {
-  return invoke<number>("copy_paths", { paths, dest });
+  return invoke<string[]>("copy_paths", { paths, dest });
 }
 
-/** 搬进某个目录。标注跟着走，算改了库 */
+/** 搬进某个目录。标注跟着走，算改了库。回的是新落地的路径，撤销时再搬回去 */
 export function movePaths(paths: string[], dest: string) {
-  return write<number>("move_paths", "files", { paths, dest });
+  return write<string[]>("move_paths", "files", { paths, dest });
 }
 
 /** 系统剪贴板上的那串文件。`cut` 为真就是剪切：粘完原件要挪走 */

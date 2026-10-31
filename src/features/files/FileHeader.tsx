@@ -1,14 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { AlignJustify, ArrowUp, ChevronLeft, ChevronRight, Folder, List, Plus, RefreshCw, X } from "lucide-react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { ArrowUp, ChevronLeft, ChevronRight, Folder, RefreshCw } from "lucide-react";
 import { useFilesStore } from "../../stores/files";
-import type { FilePanel as FilePanelShape, FileTab } from "../../stores/files";
+import type { FilePanel as FilePanelShape } from "../../stores/files";
 import useFileActions from "./useFileActions";
 import { folderName, parentOf, samePath, typedPath } from "../../utils/paths";
-import { Button, SearchBox, message, pressable } from "../../ui";
+import { Button, SearchBox } from "../../ui";
 import type { DriveInfo } from "../../types";
-
-const tabTitle = (tab: FileTab) => folderName(tab.cols[Math.min(tab.focus, tab.cols.length - 1)]?.path ?? tab.root);
 
 /** 盘符那一段用侧栏同一个叫法（卷标优先），和资源管理器的地址栏一致 */
 function crumbName(path: string, drives: DriveInfo[]): string {
@@ -36,41 +33,36 @@ function focusFileList() {
 }
 
 interface Props {
-  /** 表头只服务当前栏：点了哪栏，标签和地址就换成哪栏的 */
+  /** 地址栏只服务当前栏：点了哪栏，地址就换成哪栏的。标签条在每栏自己头顶上 */
   panel: FilePanelShape | null;
-  multi: boolean;
 }
 
 /**
- * 文件页顶上的表头：地址栏一行、标签栏一行，**横跨整块内容区**（预览栏也从它下面开始），
- * 不再是某一栏自己的头顶那两行。多栏时它跟着当前栏走，换栏即换地址。
+ * 文件页顶上的地址栏：**横跨整块内容区**（预览栏也从它下面开始）。
+ * 多栏时它跟着当前栏走，换栏即换地址；标签条不在这里，每一栏自己带一条。
  *
  * 地址栏是资源管理器那种面包屑：每一层都能点，点空白处（或 Ctrl+L / Alt+D）变成输入框，
  * 可以把一整条路径敲进去或粘进去。敲进去的路径和面包屑走同一个入口，
  * 已经在列链上的那一层只是把焦点挪过去，不把右边那几列收掉。
  */
-export default function FileHeader({ panel, multi }: Props) {
+export default function FileHeader({ panel }: Props) {
   const {
-    activateTab,
-    closeTab,
-    closePanel,
     backIn,
     forwardIn,
     upIn,
     focusColIn,
     enterIn,
     setKeywordIn,
-    setViewIn,
-    openTabIn,
   } = useFilesStore.getState();
   const drives = useFilesStore((s) => s.drives);
   const actions = useFileActions();
   const [editing, setEditing] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  /** 标签关光了栏也还在：表头照旧摆着，地址栏和 + 都能把新的目录叫回来 */
+  const panelId = panel?.id ?? "";
   const tab = panel?.tabs.find((t) => t.id === panel.activeTabId) ?? null;
   const col = tab?.cols[Math.min(Math.max(tab.focus, 0), tab.cols.length - 1)] ?? null;
-  const detail = tab?.view === "detail";
   const canBack = !!tab && (tab.cols.length > 1 || parentOf(tab.root) !== null);
   const here = col?.path ?? tab?.root ?? "";
   const crumbs = useMemo(() => crumbsOf(here, drives), [here, drives]);
@@ -104,31 +96,20 @@ export default function FileHeader({ panel, multi }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [here]);
 
-  if (!panel) return null;
-
-  const handleNewTab = async () => {
-    try {
-      const picked = await openDialog({ directory: true, multiple: false });
-      if (typeof picked === "string") await openTabIn(panel.id, picked);
-    } catch (e) {
-      message.error(String(e));
-    }
-  };
-
   const goTo = (path: string) => {
     const index = tab?.cols.findIndex((c) => samePath(c.path, path)) ?? -1;
     if (index >= 0) {
-      void focusColIn(panel.id, index);
+      void focusColIn(panelId, index);
       return;
     }
-    void enterIn(panel.id, path);
+    void enterIn(panelId, path);
   };
 
   const commit = (text: string) => {
     const target = typedPath(text, here);
     setEditing(null);
     if (!target) return;
-    void enterIn(panel.id, target).finally(() => {
+    void enterIn(panelId, target).finally(() => {
       requestAnimationFrame(focusFileList);
     });
   };
@@ -142,7 +123,7 @@ export default function FileHeader({ panel, multi }: Props) {
           icon={<ChevronLeft size={14} />}
           aria-label="后退"
           disabled={!canBack}
-          onClick={() => void backIn(panel.id)}
+          onClick={() => void backIn(panelId)}
         />
         <Button
           size="small"
@@ -150,7 +131,7 @@ export default function FileHeader({ panel, multi }: Props) {
           icon={<ChevronRight size={14} />}
           aria-label="前进"
           disabled={!tab?.forward.length}
-          onClick={() => void forwardIn(panel.id)}
+          onClick={() => void forwardIn(panelId)}
         />
         <Button
           size="small"
@@ -158,7 +139,15 @@ export default function FileHeader({ panel, multi }: Props) {
           icon={<ArrowUp size={14} />}
           aria-label="上级（收掉最右一列）"
           disabled={!canBack}
-          onClick={() => void upIn(panel.id)}
+          onClick={() => void upIn(panelId)}
+        />
+        <Button
+          size="small"
+          type="text"
+          icon={<RefreshCw size={14} />}
+          aria-label="重新读取这个目录（F5）"
+          disabled={!tab}
+          onClick={() => void actions.refresh()}
         />
         <div
           className={editing === null ? "crumb-bar" : "crumb-bar crumb-bar-editing"}
@@ -193,6 +182,7 @@ export default function FileHeader({ panel, multi }: Props) {
           ) : (
             <>
               <Folder className="crumb-lead" size={14} aria-hidden />
+              {!crumbs.length && <span className="crumb crumb-here label">输入一个路径打开文件夹</span>}
               {crumbs.map((c, i) => (
                 <Fragment key={c.path}>
                   {i > 0 && <ChevronRight className="crumb-sep" size={12} />}
@@ -210,77 +200,14 @@ export default function FileHeader({ panel, multi }: Props) {
             </>
           )}
         </div>
-        <SearchBox
-          placeholder="搜索名称 / 别名 / 说明"
-          style={{ width: 200, minWidth: 0 }}
-          value={col?.keyword ?? ""}
-          onChange={(v) => setKeywordIn(panel.id, v)}
-        />
-      </div>
-
-      <div className="file-tabs">
-        {panel.tabs.map((t) => (
-          <div
-            key={t.id}
-            className={t.id === panel.activeTabId ? "file-tab active" : "file-tab"}
-            title={t.cols[Math.min(t.focus, t.cols.length - 1)]?.path ?? t.root}
-            {...pressable(() => void activateTab(panel.id, t.id))}
-            onClick={(e) => {
-              e.stopPropagation();
-              void activateTab(panel.id, t.id);
-            }}
-          >
-            <span className="ellipsis">{tabTitle(t)}</span>
-            {panel.tabs.length > 1 && (
-              <X
-                className="file-tab-close"
-                size={13}
-                aria-label={`关闭标签「${tabTitle(t)}」`}
-                {...pressable(() => void closeTab(panel.id, t.id))}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void closeTab(panel.id, t.id);
-                }}
-              />
-            )}
-          </div>
-        ))}
-        <Plus
-          className="icon-button"
-          size={14}
-          aria-label="在本栏新打开一个文件夹"
-          {...pressable(handleNewTab)}
-          onClick={(e) => {
-            e.stopPropagation();
-            void handleNewTab();
-          }}
-        />
-        <span className="file-tab-actions">
-          <Button
-            size="small"
-            type="text"
-            icon={detail ? <List size={14} /> : <AlignJustify size={14} />}
-            aria-label={detail ? "回到紧凑列表" : "每项多摆一行大小和时间"}
-            title={detail ? "回到紧凑列表" : "每项多摆一行大小、时间和说明"}
-            onClick={() => setViewIn(panel.id, detail ? "list" : "detail")}
+        {panel && (
+          <SearchBox
+            placeholder="搜索名称 / 别名 / 说明"
+            style={{ width: 200, minWidth: 0 }}
+            value={col?.keyword ?? ""}
+            onChange={(v) => setKeywordIn(panelId, v)}
           />
-          <RefreshCw
-            className="icon-button"
-            size={14}
-            aria-label="重新读取这个目录（F5）"
-            {...pressable(() => void actions.refresh())}
-            onClick={() => void actions.refresh()}
-          />
-          {multi && (
-            <X
-              className="icon-button file-panel-close"
-              size={14}
-              aria-label="关闭这一栏"
-              {...pressable(() => void closePanel(panel.id))}
-              onClick={() => void closePanel(panel.id)}
-            />
-          )}
-        </span>
+        )}
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import * as api from "../api/files";
 import { getSettings, setSetting } from "../api/settings";
 import { previewKind } from "../utils/fileKind";
-import { parentOf } from "../utils/paths";
+import { parentOf, folderName, isUnder, samePath } from "../utils/paths";
 import { SORT_ORDER } from "../utils/sort";
 import type { DriveInfo, FileNode, FileRecord, KnownFolder, ReadTextResult } from "../types";
 
@@ -28,6 +28,8 @@ export interface FileColumn {
   nodes: FileNode[];
   /** 列不出来时的原因（没权限、目录没了）：整台机器都能点，光给空列表看着像目录真空了 */
   error: string | null;
+  /** 正在读这个目录。手上还没有内容时界面才有用（重读时旧列表继续摆着，不闪「读取中」） */
+  loading: boolean;
   /** 选中项按路径记（不按名字：同名两项在这页是常态）。视图片，loader 不许碰 */
   selected: string[];
   /** Shift 连选的那个起点，同样不入库 */
@@ -71,6 +73,23 @@ export interface PasteResult {
   mode: "copy" | "move";
 }
 
+/**
+ * 能反着再做一遍的写操作。删除只留个记号：进回收站的后端还原不了，
+ * 彻底删的更是没法回头，Ctrl+Z 遇到这两种就回一句话，不假装能撤回。
+ */
+type UndoOp =
+  | { kind: "folder"; path: string }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "paste-copy"; paths: string[] }
+  | { kind: "paste-move"; from: string[]; to: string[] }
+  | { kind: "delete"; toTrash: boolean };
+
+export interface UndoResult {
+  /** 真退回去了就是 true；删除、非空文件夹这种只解释一句 */
+  ok: boolean;
+  text: string;
+}
+
 interface SavedColumn {
   path: string;
   selected?: string[];
@@ -111,6 +130,7 @@ function makeColumn(path: string): FileColumn {
     path,
     nodes: [],
     error: null,
+    loading: true,
     selected: [],
     anchor: null,
     keyword: "",
@@ -198,6 +218,11 @@ interface FilesStore {
   showHidden: boolean;
   panels: FilePanel[];
   activePanelId: string | null;
+  /** 正被拖着的那颗标签。只在拖拽期间有值，不进布局也不落库 */
+  dragTab: { panelId: string; tabId: string } | null;
+  /** 正被拖着的那串文件（列表行）。sourceDir 用来判同卷跨卷，
+      dirs 是其中挑得出来的目录 —— 落到标签上时只有它能开成标签/分栏。同样只在拖拽期间有值 */
+  dragFiles: { paths: string[]; sourceDir: string; dirs: string[] } | null;
   /** 路径 → 系统画好的 png。侧栏和列表都从这里取，取不到再退回线条图标 */
   icons: Record<string, string>;
   record: FileRecord | null;
@@ -228,7 +253,26 @@ interface FilesStore {
   addPanel: () => Promise<void>;
   closePanel: (panelId: string) => Promise<void>;
   setPanelWidth: (panelId: string, width: number) => void;
-  /** 重读每个标签每一列当前的目录（磁盘变更、切了隐藏项开关都走这里） */
+  setDragTab: (drag: { panelId: string; tabId: string } | null) => void;
+  /** 标签拖进另一栏的标签条：并进那一栏；目标栏里已经有同目录的标签就直接切过去 */
+  moveTabToPanel: (fromPanelId: string, tabId: string, toPanelId: string) => Promise<void>;
+  /** 标签拖到某一栏的列区：在这一栏右边拆出一栏，只装这颗标签 */
+  splitTabToNewPanel: (fromPanelId: string, tabId: string, afterPanelId: string) => Promise<void>;
+  setDragFiles: (drag: { paths: string[]; sourceDir: string; dirs: string[] } | null) => void;
+  /** 把某个目录作为新的一栏，摆在 afterPanelId 右边 */
+  splitDirToNewPanel: (path: string, afterPanelId: string) => Promise<void>;
+  /** 框选：hits 是框住的那串，additive 时并进按下框那一刻的 base，不并就别管以前选了啥 */
+  selectPathsIn: (
+    panelId: string,
+    colIndex: number,
+    hits: string[],
+    additive: boolean,
+    base: string[],
+  ) => Promise<void>;
+  /** 拖拽落地：把这串搬/拷进 dest。本来就在 dest 里的、拖进自己的先摘掉；落地后在目标目录里选中它们 */
+  dropFilesInto: (paths: string[], dest: string, mode: "copy" | "move") => Promise<PasteResult | null>;
+  /** 重读每栏当前那颗标签的目录（磁盘变更、切了隐藏项开关都走这里）。
+      后台标签不在这儿读，等切过去时 activateTab 补 */
   reloadTabs: () => Promise<void>;
   toggleShowHidden: (on: boolean) => Promise<void>;
   togglePin: (path: string) => Promise<void>;
@@ -255,6 +299,8 @@ interface FilesStore {
   deleteSelected: (toTrash: boolean) => Promise<number>;
   /** 把系统剪贴板里那串文件粘进当前列；剪贴板里没有文件时回 undefined */
   pasteIntoActive: () => Promise<PasteResult | undefined>;
+  /** Ctrl+Z：把上一步能反着做的写操作退回去；栈空回 null */
+  undoLast: () => Promise<UndoResult | null>;
   /** 系统剪贴板才是真的那份：窗口重新拿到焦点时照着它更新镜像 */
   syncClipboard: () => Promise<void>;
   saveMeta: (path: string, alias: string | null, description: string | null) => Promise<void>;
@@ -264,6 +310,30 @@ export const useFilesStore = create<FilesStore>((set, get) => {
   let settleTimer: number | undefined;
   /** 预览请求的序号：后点的覆盖先点的，先点的那次回来时自己作废 */
   let previewSeq = 0;
+  /** 最近几步写操作的反向动作。只在本会话里留着，重启就清空 */
+  const undos: UndoOp[] = [];
+  const UNDO_LIMIT = 20;
+  const pushUndo = (op: UndoOp) => {
+    undos.push(op);
+    if (undos.length > UNDO_LIMIT) undos.shift();
+  };
+
+  /** 眼下真正看得见的那几条目录：每栏当前标签的整串列。
+      藏起来的标签既不读盘也不监视 —— 几十个标签挂在后台时，全挂监视器的代价是每动一下
+      磁盘就要把整页重扫一遍，而这页只画当前标签那几列。切回去时 activateTab 会补读 */
+  const visibleDirs = (panels: FilePanel[]) =>
+    [
+      ...new Set(
+        panels.flatMap((p) => {
+          const t = p.tabs.find((x) => x.id === p.activeTabId);
+          return t ? t.cols.map((c) => c.path) : [];
+        }),
+      ),
+    ];
+
+  /** 上次发出去的监视清单。目录没变就不再发：选一项、拖一下也会 settle，
+      但那不该让后端把整套监视拆了重建 */
+  let watchedKey: string | null = null;
 
   /** 布局改一次写一次会把这张 KV 和别的窗口刷个不停，攒一下再落。
       监视哪几个目录也在这一下里一起说给后端 */
@@ -272,7 +342,10 @@ export const useFilesStore = create<FilesStore>((set, get) => {
     settleTimer = window.setTimeout(() => {
       const { panels, activePanelId } = get();
       void setSetting(LAYOUT_KEY, JSON.stringify(toSavedLayout(panels, activePanelId))).catch(() => undefined);
-      const dirs = [...new Set(panels.flatMap((p) => p.tabs.flatMap((t) => t.cols.map((c) => c.path))))];
+      const dirs = visibleDirs(panels);
+      const key = dirs.join("\n");
+      if (key === watchedKey) return;
+      watchedKey = key;
       void api.watchFolders(dirs).catch(() => undefined);
     }, 400);
   };
@@ -357,6 +430,7 @@ export const useFilesStore = create<FilesStore>((set, get) => {
     const tab = get().panels.find((p) => p.id === panelId)?.tabs.find((t) => t.id === tabId);
     const col = tab?.cols.find((c) => c.id === colId);
     if (!col) return;
+    if (!col.loading) patchCol(panelId, tabId, colId, (c) => ({ ...c, loading: true }));
     let nodes: FileNode[] = [];
     let error: string | null = null;
     try {
@@ -372,7 +446,14 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       ?.cols.find((c) => c.id === colId);
     if (!still || still.path !== col.path) return;
     const alive = nodes.filter((n) => still.selected.includes(n.path)).map((n) => n.path);
-    patchCol(panelId, tabId, colId, (c) => ({ ...c, nodes, error, selected: alive, anchor: alive[0] ?? null }));
+    patchCol(panelId, tabId, colId, (c) => ({
+      ...c,
+      nodes,
+      error,
+      loading: false,
+      selected: alive,
+      anchor: alive[0] ?? null,
+    }));
     rememberIcons(nodes);
     /** 选中的那几项没了（被删、被隐藏）才动预览；只是内容变了不动它 */
     if (alive.length !== still.selected.length && isFocused(panelId, tabId, colId)) await syncPreview();
@@ -385,15 +466,16 @@ export const useFilesStore = create<FilesStore>((set, get) => {
     await Promise.all(tab.cols.map((c) => loadColumn(panelId, tabId, c.id)));
   };
 
-  /** 只重读停在这几个目录上的列：删一个文件不该把整页的目录都扫一遍 */
+  /** 只重读眼下看得见的那些列：删一个文件不该把整页的目录都扫一遍。
+      后台标签里的同目录列先不动，切回那颗标签时 activateTab 会整串补读 */
   const reloadDirs = async (dirs: string[]) => {
     const targets = new Set(dirs);
     const jobs: Promise<void>[] = [];
     for (const p of get().panels) {
-      for (const t of p.tabs) {
-        for (const c of t.cols) {
-          if (targets.has(c.path)) jobs.push(loadColumn(p.id, t.id, c.id));
-        }
+      const t = p.tabs.find((x) => x.id === p.activeTabId);
+      if (!t) continue;
+      for (const c of t.cols) {
+        if (targets.has(c.path)) jobs.push(loadColumn(p.id, t.id, c.id));
       }
     }
     await Promise.all(jobs);
@@ -438,17 +520,31 @@ export const useFilesStore = create<FilesStore>((set, get) => {
     await loadColumn(panelId, tabId, col.id);
   };
 
+  /**
+   * 「就在当前标签里换过去」。侧栏、地址栏、右键里的「打开」都走这里，所以哪怕记着的当前栏已经对不上
+   * （栏被拆掉、全关光之后状态落后），也绝不为此另叠一颗标签 —— 有栏就落到第一栏上，
+   * 真的一栏都没有才建。用户点侧栏那一下的意思永远是「换个地方看」，不是「再开一颗」。
+   */
   const enterIn = async (panelId: string, path: string) => {
     const { panel, tab } = find(panelId);
-    if (!panel || !tab) {
-      const created = makePanel(path);
-      set((state) => ({ panels: [...state.panels, created], activePanelId: created.id }));
-      settle();
-      await loadTabColumns(created.id, created.activeTabId);
+    if (panel && tab) {
+      if (focusedCol(tab).path === path) return;
+      await reroot(panel.id, tab.id, path);
       return;
     }
-    if (focusedCol(tab).path === path) return;
-    await reroot(panel.id, tab.id, path);
+    const fallback = get().panels.find((p) => p.tabs.length) ?? null;
+    if (fallback) {
+      const target = fallback.tabs.find((t) => t.id === fallback.activeTabId) ?? fallback.tabs[0];
+      set({ activePanelId: fallback.id });
+      settle();
+      if (focusedCol(target).path === path) return;
+      await reroot(fallback.id, target.id, path);
+      return;
+    }
+    const created = makePanel(path);
+    set((state) => ({ panels: [...state.panels, created], activePanelId: created.id }));
+    settle();
+    await loadTabColumns(created.id, created.activeTabId);
   };
 
   const backIn = async (panelId: string) => {
@@ -512,6 +608,8 @@ export const useFilesStore = create<FilesStore>((set, get) => {
     showHidden: false,
     panels: [],
     activePanelId: null,
+    dragTab: null,
+    dragFiles: null,
     icons: {},
     record: null,
     preview: null,
@@ -567,8 +665,11 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       if (!panels.length && first) panels.push(makePanel(first));
       /** 这里不 settle：布局本来就是刚从库里读回来的，再写一遍只是给别的窗口发一发空广播 */
       set({ panels, activePanelId: panels[0]?.id ?? null });
-      await Promise.all(panels.flatMap((p) => p.tabs.map((t) => loadTabColumns(p.id, t.id))));
-      const dirs = [...new Set(panels.flatMap((p) => p.tabs.flatMap((t) => t.cols.map((c) => c.path))))];
+      /** 只读每栏当前那颗标签：上次退出时挂着的后台标签等切过去再读，
+          否则标签一多，启动就要把几十个目录同时扫一遍 */
+      await Promise.all(panels.map((p) => loadTabColumns(p.id, p.activeTabId)));
+      const dirs = visibleDirs(panels);
+      watchedKey = dirs.join("\n");
       void api.watchFolders(dirs).catch(() => undefined);
       /** 上次关窗时选着的那一项要接着预览；不做这一步，右边会一直停在授权中的转圈上 */
       await syncPreview();
@@ -659,11 +760,21 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       await syncPreview();
     },
     activateTab: async (panelId, tabId) => {
+      const { panels, activePanelId } = get();
+      const panel = panels.find((p) => p.id === panelId);
+      const tab = panel?.tabs.find((t) => t.id === tabId);
+      if (!panel || !tab) return;
+      /** 点的是已经摆在眼前的这颗标签：什么都不会变，别再 settle 一次、更不用读盘 */
+      if (panel.activeTabId === tabId && activePanelId === panelId) return;
+      const switching = panel.activeTabId !== tabId;
       set((state) => ({
         activePanelId: panelId,
         panels: state.panels.map((p) => (p.id === panelId ? { ...p, activeTabId: tabId } : p)),
       }));
       settle();
+      /** 后台标签没在监视、也没读过：切回来先把这一串列重读一遍，预览再照结果对。
+          旧内容在重读期间继续摆着，所以不会闪空白 */
+      if (switching) await loadTabColumns(panelId, tabId);
       await syncPreview();
     },
     closeTab: async (panelId, tabId) => {
@@ -677,15 +788,18 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       }
       /** 关掉的是当前标签时往左邻一个，全关完了才收栏 */
       const wasActive = panel.activeTabId === tabId;
+      const nextActiveId = wasActive ? rest[Math.min(index, rest.length - 1)].id : panel.activeTabId;
       set((state) => ({
         panels: state.panels.map((p) =>
-          p.id === panelId
-            ? { ...p, tabs: rest, activeTabId: wasActive ? rest[Math.min(index, rest.length - 1)].id : p.activeTabId }
-            : p,
+          p.id === panelId ? { ...p, tabs: rest, activeTabId: nextActiveId } : p,
         ),
       }));
       settle();
-      if (wasActive && get().activePanelId === panelId) await syncPreview();
+      if (wasActive) {
+        /** 接替的那颗可能一直待在后台、内容都还没读过：先把它读出来 */
+        await loadTabColumns(panelId, nextActiveId);
+        if (get().activePanelId === panelId) await syncPreview();
+      }
     },
     addPanel: async () => {
       const { drives, knownFolders, pinned, panels } = get();
@@ -714,9 +828,155 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       set((state) => ({ panels: state.panels.map((p) => (p.id === panelId ? { ...p, width } : p)) }));
       settle();
     },
-    reloadTabs: async () => {
+    setDragTab: (drag) => {
+      set({ dragTab: drag });
+    },
+    moveTabToPanel: async (fromPanelId, tabId, toPanelId) => {
+      if (fromPanelId === toPanelId) return;
       const { panels } = get();
-      await Promise.all(panels.flatMap((p) => p.tabs.map((t) => loadTabColumns(p.id, t.id))));
+      const from = panels.find((p) => p.id === fromPanelId);
+      const to = panels.find((p) => p.id === toPanelId);
+      const index = from?.tabs.findIndex((t) => t.id === tabId) ?? -1;
+      if (!from || !to || index < 0) return;
+      const tab = from.tabs[index];
+      const rest = from.tabs.filter((t) => t.id !== tabId);
+      /** 目标栏里已经有同目录的标签，就不再叠一颗：切过去，等于把这颗并掉 */
+      const dup = to.tabs.find((t) => focusedCol(t).path === focusedCol(tab).path) ?? null;
+      const sourceNextId =
+        rest.length && from.activeTabId === tabId ? rest[Math.min(index, rest.length - 1)].id : null;
+      const targetActiveId = dup ? dup.id : tab.id;
+      const next: FilePanel[] = [];
+      for (const p of panels) {
+        if (p.id === from.id) {
+          if (!rest.length) continue;
+          next.push({
+            ...p,
+            tabs: rest,
+            activeTabId: from.activeTabId === tabId ? rest[Math.min(index, rest.length - 1)].id : p.activeTabId,
+          });
+          continue;
+        }
+        if (p.id === to.id) {
+          next.push(dup ? { ...p, activeTabId: dup.id } : { ...p, tabs: [...p.tabs, tab], activeTabId: tab.id });
+          continue;
+        }
+        next.push(p);
+      }
+      set({ panels: next, activePanelId: to.id, dragTab: null });
+      settle();
+      /** 拖过来的标签、以及顶替它位置的那颗，都可能一直在后台没读过 */
+      await loadTabColumns(to.id, targetActiveId);
+      if (sourceNextId) await loadTabColumns(from.id, sourceNextId);
+      await syncPreview();
+    },
+    splitTabToNewPanel: async (fromPanelId, tabId, afterPanelId) => {
+      const { panels } = get();
+      const from = panels.find((p) => p.id === fromPanelId);
+      const index = from?.tabs.findIndex((t) => t.id === tabId) ?? -1;
+      if (!from || index < 0) return;
+      const tab = from.tabs[index];
+      const rest = from.tabs.filter((t) => t.id !== tabId);
+      const sourceNextId =
+        rest.length && from.activeTabId === tabId ? rest[Math.min(index, rest.length - 1)].id : null;
+      const created: FilePanel = { id: nextId("panel"), tabs: [tab], activeTabId: tab.id, width: null };
+      const next: FilePanel[] = [];
+      for (const p of panels) {
+        if (p.id === from.id) {
+          /** 这颗标签是源栏的最后一颗时，源栏直接消失，别留一条空壳 */
+          if (!rest.length) continue;
+          next.push({
+            ...p,
+            tabs: rest,
+            activeTabId: from.activeTabId === tabId ? rest[Math.min(index, rest.length - 1)].id : p.activeTabId,
+          });
+          continue;
+        }
+        next.push(p);
+      }
+      let at: number;
+      if (afterPanelId !== fromPanelId) {
+        const found = next.findIndex((p) => p.id === afterPanelId);
+        at = found >= 0 ? found + 1 : next.length;
+      } else {
+        const found = next.findIndex((p) => p.id === fromPanelId);
+        /** 源栏还留着：新栏排在它右边。源栏被拆空了：新栏就顶在它原来的位置 */
+        at = found >= 0 ? found + 1 : Math.min(Math.max(panels.findIndex((p) => p.id === fromPanelId), 0), next.length);
+      }
+      next.splice(at, 0, created);
+      set({ panels: next, activePanelId: created.id, dragTab: null });
+      settle();
+      /** 拆出来的标签可能来自后台、内容还没读过；源栏顶替上来的那颗同理 */
+      await loadTabColumns(created.id, tab.id);
+      if (sourceNextId) await loadTabColumns(from.id, sourceNextId);
+      await syncPreview();
+    },
+    setDragFiles: (drag) => {
+      set({ dragFiles: drag });
+    },
+    splitDirToNewPanel: async (path, afterPanelId) => {
+      const created = makePanel(path);
+      set((state) => {
+        const at = state.panels.findIndex((p) => p.id === afterPanelId);
+        const next = [...state.panels];
+        /** 落在某一栏的标签上：新栏就摆在那一栏右边 */
+        next.splice(at >= 0 ? at + 1 : next.length, 0, created);
+        return { panels: next, activePanelId: created.id };
+      });
+      settle();
+      await loadTabColumns(created.id, created.activeTabId);
+      await syncPreview();
+    },
+    selectPathsIn: async (panelId, colIndex, hits, additive, base) => {
+      const { panel, tab } = find(panelId);
+      const col = tab?.cols[colIndex];
+      if (!panel || !tab || !col) return;
+      /** 框选每挪一下都会调到这里，没变就别 set：整页跟着刷新一遍太浪费 */
+      const next = additive ? [...base, ...hits.filter((p) => !base.includes(p))] : hits;
+      const now = new Set(col.selected);
+      if (next.length === col.selected.length && next.every((p) => now.has(p))) return;
+      patchTab(panel.id, tab.id, (t) => ({
+        ...t,
+        cols: t.cols.map((c) =>
+          c.id === col.id ? { ...c, selected: next, anchor: additive ? c.anchor : next[0] ?? null } : c,
+        ),
+        focus: colIndex,
+      }));
+      settle();
+      if (get().activePanelId !== panel.id) return;
+      await syncPreview();
+    },
+    dropFilesInto: async (paths, dest, mode) => {
+      /** 拖到它自己（或它底下某一层）身上、或者拖回它本来就待着的目录，都不算动作 */
+      const usable = paths.filter(
+        (p) => !isUnder(dest, p) && !samePath(parentOf(p) ?? "", dest),
+      );
+      set({ dragFiles: null });
+      if (!usable.length) return null;
+      const made = mode === "copy" ? await api.copyPaths(usable, dest) : await api.movePaths(usable, dest);
+      if (mode === "copy") pushUndo({ kind: "paste-copy", paths: made });
+      else pushUndo({ kind: "paste-move", from: usable, to: made });
+      const srcDirs = usable.map((p) => parentOf(p)).filter((p): p is string => !!p);
+      await reloadDirs([...new Set([...srcDirs, dest])]);
+      /** 资源管理器的习惯：搬/拷完在新的那一层里把它们选中，接着就能继续动它们 */
+      for (const p of get().panels) {
+        for (const t of p.tabs) {
+          for (const c of t.cols) {
+            if (!samePath(c.path, dest)) continue;
+            const alive = made.filter((m) => c.nodes.some((n) => samePath(n.path, m)));
+            if (alive.length) patchCol(p.id, t.id, c.id, (x) => ({ ...x, selected: alive, anchor: alive[0] }));
+          }
+        }
+      }
+      /** 落下之后选中的是新的那几项，布局也跟着落一下 */
+      settle();
+      await syncPreview();
+      return { count: made.length, mode };
+    },
+    reloadTabs: async () => {
+      /** 只重读眼下看得见的那几颗标签。磁盘事件、隐藏项开关、别的窗口改文件都走这里：
+          后台标签等切过去时 activateTab 会自己补读，没必要每次让几十个目录一起重扫 */
+      const { panels } = get();
+      await Promise.all(panels.map((p) => loadTabColumns(p.id, p.activeTabId)));
     },
     refreshActive: async () => {
       const cur = currentCol();
@@ -810,13 +1070,16 @@ export const useFilesStore = create<FilesStore>((set, get) => {
     createFolderHere: async (name) => {
       const cur = currentCol();
       if (!cur) return;
-      await api.createFolder(cur.col.path, name);
+      const made = await api.createFolder(cur.col.path, name);
+      pushUndo({ kind: "folder", path: made });
       await loadColumn(cur.panel.id, cur.tab.id, cur.col.id);
     },
     renameSelected: async (newName) => {
       const cur = currentCol();
       if (!cur || cur.col.selected.length !== 1) return;
-      await api.renamePath(cur.col.selected[0], newName);
+      const before = cur.col.selected[0];
+      const after = await api.renamePath(before, newName);
+      if (after !== before) pushUndo({ kind: "rename", from: before, to: after });
       /** 改的是目录名的话，右边那几列的路径全作废 */
       patchTab(cur.panel.id, cur.tab.id, (t) => ({ ...t, cols: t.cols.slice(0, t.focus + 1), forward: [] }));
       await loadColumn(cur.panel.id, cur.tab.id, cur.col.id);
@@ -826,6 +1089,7 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       if (!cur || !cur.col.selected.length) return 0;
       const paths = [...cur.col.selected];
       const n = await api.deletePaths(paths, toTrash);
+      pushUndo({ kind: "delete", toTrash });
       /** 剪贴板里要是也有这几项，把删掉的那些摘出去：留着它们，下一次粘贴就是在往不存在的路径上做动作 */
       const clip = get().clipboard;
       if (clip?.mode === "move" && clip.paths.some((p) => paths.includes(p))) {
@@ -839,6 +1103,69 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       await loadColumn(cur.panel.id, cur.tab.id, cur.col.id);
       return n;
     },
+    undoLast: async () => {
+      const op = undos.pop();
+      if (!op) return null;
+      /** 反做完要把碰过的目录都重读一遍，不然栏里摆的还是撤销前的样子 */
+      const dirs = new Set<string>();
+      const touch = (p: string | null) => {
+        if (p) dirs.add(p);
+      };
+      let result: UndoResult;
+      switch (op.kind) {
+        case "folder": {
+          /** 只撤空文件夹：用户要是已经往里放了东西，替他把整包删掉不是「撤销」 */
+          const inside = await api.listFiles(op.path, true);
+          if (inside.length) return { ok: false, text: "新建的那个文件夹里已经放了东西，没有删" };
+          await api.deletePaths([op.path], false);
+          touch(parentOf(op.path));
+          result = { ok: true, text: "已撤销新建文件夹" };
+          break;
+        }
+        case "rename": {
+          const back = await api.renamePath(op.to, folderName(op.from));
+          touch(parentOf(op.from));
+          touch(parentOf(back));
+          result = { ok: true, text: `已撤销重命名，名字改回「${folderName(back)}」` };
+          break;
+        }
+        case "paste-copy": {
+          /** 删的是刚拷出来的副本，原件都还在；仍走回收站，万一删错了还能捞回来 */
+          await api.deletePaths(op.paths, true);
+          op.paths.forEach((p) => touch(parentOf(p)));
+          result = { ok: true, text: `已撤销，${op.paths.length} 项副本送进了回收站` };
+          break;
+        }
+        case "paste-move": {
+          const failed: string[] = [];
+          for (let i = 0; i < op.to.length; i++) {
+            const home = parentOf(op.from[i]);
+            touch(parentOf(op.to[i]));
+            if (!home) {
+              failed.push(folderName(op.from[i]));
+              continue;
+            }
+            try {
+              await api.movePaths([op.to[i]], home);
+              touch(home);
+            } catch {
+              failed.push(folderName(op.to[i]));
+            }
+          }
+          result = failed.length
+            ? { ok: false, text: `撤销没做完，${failed.join("、")} 挪不回原处` }
+            : { ok: true, text: `已撤销，${op.to.length} 项挪回原处` };
+          break;
+        }
+        case "delete":
+          return {
+            ok: false,
+            text: op.toTrash ? "这几项在回收站里，去回收站还原就行" : "彻底删除的项目没法撤销",
+          };
+      }
+      await reloadDirs([...dirs]);
+      return result;
+    },
     pasteIntoActive: async () => {
       const cur = currentCol();
       if (!cur) return undefined;
@@ -850,11 +1177,14 @@ export const useFilesStore = create<FilesStore>((set, get) => {
         return undefined;
       }
       const mode = got.cut ? "move" : "copy";
-      /** 「不能粘进它自己里面」由后端逐条检查，这里不再判一遍 */
-      const count =
+      /** 「不能粘进它自己里面」由后端逐条检查，这里不再判一遍。回的是新落地的路径 */
+      const made =
         mode === "copy"
           ? await api.copyPaths(got.paths, cur.col.path)
           : await api.movePaths(got.paths, cur.col.path);
+      const count = made.length;
+      if (mode === "copy") pushUndo({ kind: "paste-copy", paths: made });
+      else pushUndo({ kind: "paste-move", from: got.paths, to: made });
       if (mode === "move") {
         /** 搬完就照资源管理器那样把这串标成作废：留着它，下一次谁粘都是往不存在的路径上做动作 */
         try {

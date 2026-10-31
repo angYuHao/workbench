@@ -10,6 +10,7 @@ import { openPath, revealInExplorer } from "../../api/shell";
 import OfficePreview from "./OfficePreview";
 import TextPreview from "./TextPreview";
 import { previewKind } from "../../utils/fileKind";
+import { formatBytes } from "../../utils/humanize";
 import type { FileNode, FileRecord, ReadTextResult } from "../../types";
 
 interface Props {
@@ -62,6 +63,12 @@ const mdRehypePlugins: NonNullable<MarkdownOptions["rehypePlugins"]> = [
 const USABLE_URL_RE = /^(https?:|data:|asset:|blob:|mailto:)/i;
 const DRIVE_PATH_RE = /^[a-z]:[\\/]/i;
 
+/** asset 协议的响应在 wry 里是先整份读进内存、再包成 `SHCreateMemStream`，
+    长度超过 u32 上限时它内部的 `u32::try_from(len).unwrap()` 会 panic 把进程带走。
+    下面这几种预览都要整份拿文件，所以先按列表里的大小挡一道，太大的交给系统程序。
+    文本预览不走这条路（后端只读开头一段），不在这道限制里。 */
+const MAX_ASSET_PREVIEW_BYTES = 256 * 1024 * 1024;
+
 function dirOf(filePath: string): string {
   const idx = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
   return idx <= 0 ? "" : filePath.slice(0, idx);
@@ -108,9 +115,17 @@ export default function PreviewPanel({ node, record, preview, ready }: Props) {
   }
 
   const kind = previewKind(node.name);
+  /** 这几种都要经 asset 协议整份读；size 拿不到（极少数情况）就照旧渲染 */
+  const assetBacked =
+    kind === "image" || kind === "pdf" || kind === "html" || kind === "sheet" || kind === "doc";
+  const tooBig = assetBacked && (node.size ?? 0) > MAX_ASSET_PREVIEW_BYTES;
 
   const content = node.isDir ? (
     <Empty description="目录" />
+  ) : tooBig ? (
+    <div style={{ color: "var(--color-text-secondary)", fontSize: 13, lineHeight: 1.7 }}>
+      这个文件有 {formatBytes(node.size)}，太大了，不做内嵌预览。点上方「用系统程序打开」查看。
+    </div>
   ) : kind === "image" ? (
     <img
       src={convertFileSrc(node.path)}

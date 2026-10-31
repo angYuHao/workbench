@@ -142,6 +142,8 @@
   flex: 1;
   min-width: 0;
   flex-direction: column;
+  /** 跟另外三页的内容区一致：列表这一大片用卡片白当底，左侧文件栏仍是主题底色 */
+  background: var(--color-card);
 }
 
 .file-panes {
@@ -288,7 +290,7 @@
   pointer-events: none;
 }
 
-/* 表头第二行：当前栏开着的几个文件夹。标签多了这一条自己横滚，右边的几个按钮不跟着滚走 */
+/* 标签条：一栏里开着的几个文件夹。标签多了这一条自己横滚，右边的几个按钮不跟着滚走 */
 .file-tabs {
   display: flex;
   align-items: center;
@@ -299,11 +301,39 @@
   scrollbar-width: thin;
 }
 
+/* 每一栏自己头顶那条标签栏：分栏后各管各的，跟 IDE 的分栏一样 */
+.panel-tabs {
+  flex-shrink: 0;
+  padding: 4px 6px;
+}
+
+/* 别的栏的标签正悬在这一条上：并进这一栏 */
+.panel-tabs.drop-target {
+  background: var(--color-primary-faint);
+  box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+/* 文件夹拖到标签条空白处：松手在这一栏新开一个标签 */
+.panel-tabs.add-target {
+  background: var(--color-primary-faint);
+  box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+/* 拖着文件夹悬在标签条上时，直接说清这一下会做成什么 */
+.tab-drop-hint {
+  flex-shrink: 0;
+  margin-left: 4px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .file-tabs > .icon-button {
   flex-shrink: 0;
 }
 
-/* 视图切换、重读、关栏这三颗顶到最右，跟左边的标签隔开 */
+/* 视图切换、关栏这两颗顶到最右，跟左边的标签隔开 */
 .file-tab-actions {
   display: flex;
   align-items: center;
@@ -320,7 +350,8 @@
   max-width: 160px;
   padding: 3px 10px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  /** 跟外观里的圆角档位一起走：直角/小圆角/圆角/大圆角各是各的，不钉死成胶囊 */
+  border-radius: var(--radius-control);
   color: var(--color-text-secondary);
   font-size: 12px;
   cursor: pointer;
@@ -335,6 +366,19 @@
   border-color: var(--color-border);
   color: var(--color-primary-text);
   font-weight: 600;
+}
+
+/* 正被拖着的那颗：留在原地做个记号，松手前就知道拖的是哪一个 */
+.file-tab.dragging {
+  opacity: 0.45;
+}
+
+/* 文件夹停在一颗标签上：松手在这栏右边拆出新的一栏。放在 active 之后，
+   不然悬停/激活那颗的底色会把它盖掉 */
+.file-tab.split-target {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-text);
+  box-shadow: inset -2px 0 0 var(--color-primary);
 }
 
 .file-tab-close {
@@ -354,11 +398,28 @@
 
 /* ---- Miller 列：一个标签里从根目录开始向右排开的一串目录 ---- */
 .miller {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+/* 拖着标签划过列区时整块亮一下：在这儿松手会在右边拆出一栏 */
+.miller-split-drop {
+  position: absolute;
+  inset: 6px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-card);
+  background: var(--color-primary-faint);
+  color: var(--color-primary-text);
+  font-size: 12px;
+  pointer-events: none;
 }
 
 /* 列数少时每列均分整栏；多到放不下就按 220 的底线横向滚动 */
@@ -375,9 +436,10 @@
   border-right: none;
 }
 
-/* 焦点列底色亮一档：键盘和右键都作用于这一列，得看得出是哪一列 */
+/* 焦点列只在最上面那条边换颜色，另外三边和底色都保持原样：
+   键盘和右键都作用于这一列，整块勾一圈会跟行选中抢注意力 */
 .miller-col.focused {
-  background: var(--color-card);
+  box-shadow: inset 0 1px 0 var(--color-primary);
 }
 
 .miller-body {
@@ -385,6 +447,12 @@
   min-height: 0;
   padding: 6px;
   overflow-y: auto;
+}
+
+/* 拖着文件悬在这一列空白处：整列亮一圈，表示放进这个目录 */
+.miller-body.drop-into {
+  background: var(--color-primary-faint);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 
 .miller-empty,
@@ -419,6 +487,28 @@
 .file-row.row-selected {
   background: var(--color-primary-faint);
   color: var(--color-primary-text);
+}
+
+/* 正被拖着的那几行 */
+.file-row.row-dragging {
+  opacity: 0.45;
+}
+
+/* 拖过来的文件正悬在这个目录上 */
+.file-row.drop-target {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-text);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+/* 框选用的那条矩形：固定定位，跟着鼠标走，不跟列里的滚动纠缠 */
+.file-band {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary-faint);
+  opacity: 0.7;
 }
 
 .file-icon-slot {
@@ -470,16 +560,6 @@
 }
 
 /* 每行右边那支笔：平时不占视觉，悬停或键盘聚焦时才露出来 */
-.row-edit {
-  flex-shrink: 0;
-  opacity: 0;
-}
-
-.file-row:hover .row-edit,
-.row-edit:focus-visible {
-  opacity: 1;
-}
-
 /* 文件页侧栏：上面几节自己滚，隐藏项/收藏/分栏那几颗钉在底下 */
 .files-side {
   display: flex;

@@ -228,7 +228,6 @@ export default function AppsView() {
         </div>
         <div className="content-pane">
           <div className="card-bar">
-            <h2 className="card-bar-title">应用</h2>
             <SearchBox placeholder="搜索程序名 / 路径" value={keyword} onChange={setKeyword} />
             <div className="toolbar-spacer" />
             {selection.active ? (

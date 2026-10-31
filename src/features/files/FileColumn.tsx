@@ -1,10 +1,12 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { FileText, Folder, Pencil } from "lucide-react";
+import { FileText, Folder } from "lucide-react";
 import { openPath } from "../../api/shell";
 import { useFilesStore } from "../../stores/files";
 import type { FileTab } from "../../stores/files";
 import { visibleNodes } from "./listing";
+import { canDropInto, dropInto, dropMode } from "./dnd";
+import useRubberBand from "./useRubberBand";
 import { formatBytes, formatWhen } from "../../utils/humanize";
 import { message, pressable } from "../../ui";
 import type { FileNode } from "../../types";
@@ -16,7 +18,6 @@ interface Props {
   focused: boolean;
   detail: boolean;
   icons: Record<string, string>;
-  onEdit: (node: FileNode) => void;
   onMenu: (at: { x: number; y: number }) => void;
   onActivate: () => void;
 }
@@ -39,15 +40,34 @@ export default function FileColumn({
   focused,
   detail,
   icons,
-  onEdit,
   onMenu,
   onActivate,
 }: Props) {
   const col = tab.cols[index];
-  const { pickIn, enterIn, focusColIn } = useFilesStore.getState();
+  const { pickIn, enterIn, focusColIn, selectPathsIn, clearSelection, setDragFiles } = useFilesStore.getState();
   const visible = useMemo(() => (col ? visibleNodes(col) : []), [col]);
   const visiblePaths = useMemo(() => visible.map((n) => n.path), [visible]);
   const selected = col?.selected ?? [];
+  /** 正被拖着的那串文件：这一列里那几行要跟着变淡 */
+  const dragFiles = useFilesStore((s) => s.dragFiles);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /** 拖过来的文件正悬在哪个目录行上、或者悬在这一列空白处 */
+  const [dropPath, setDropPath] = useState<string | null>(null);
+  const [overCol, setOverCol] = useState(false);
+  /** 框选：只在空白处按下去才起框，行上的按下留给拖拽 */
+  const { band, start: startBand } = useRubberBand(
+    bodyRef,
+    (hits, additive, base) => void selectPathsIn(panelId, index, hits, additive, base),
+    () => void clearSelection(panelId, index),
+  );
+
+  /** 拖拽一结束就把悬停记号收掉：不然下一次拖别的东西时，这一列会先亮一下上次的落点 */
+  useEffect(() => {
+    if (!dragFiles) {
+      setDropPath(null);
+      setOverCol(false);
+    }
+  }, [dragFiles]);
 
   if (!col) return null;
 
@@ -74,9 +94,33 @@ export default function FileColumn({
       }}
     >
       <div
-        className="miller-body"
+        className={["miller-body", overCol && dragFiles ? "drop-into" : ""].filter(Boolean).join(" ")}
+        ref={bodyRef}
         onMouseDown={(e) => {
-          if (e.target === e.currentTarget) focusHere();
+          if (e.target !== e.currentTarget) return;
+          focusHere();
+          startBand(e, selected);
+        }}
+        /** 空白处也接落点：就是放进这个目录 */
+        onDragOver={(e) => {
+          const d = useFilesStore.getState().dragFiles;
+          if (!d || !canDropInto(d.paths, col.path)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = dropMode(d.sourceDir, col.path, e);
+          if (dropPath) setDropPath(null);
+          if (!overCol) setOverCol(true);
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+          setOverCol(false);
+        }}
+        onDrop={(e) => {
+          if (!useFilesStore.getState().dragFiles) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setOverCol(false);
+          void dropInto(col.path, e);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -86,6 +130,8 @@ export default function FileColumn({
       >
         {col.error ? (
           <div className="miller-error">这个目录读不出来：{col.error}</div>
+        ) : col.loading && !col.nodes.length ? (
+          <div className="miller-empty">读取中…</div>
         ) : !visible.length ? (
           <div className="miller-empty">{col.keyword.trim() ? "没有匹配的项" : "空文件夹"}</div>
         ) : (
@@ -98,11 +144,63 @@ export default function FileColumn({
                   "file-row",
                   selected.includes(node.path) ? "row-selected" : "",
                   node.hidden ? "row-hidden-item" : "",
+                  dragFiles?.paths.includes(node.path) ? "row-dragging" : "",
+                  dragFiles && dropPath === node.path ? "drop-target" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
+                data-path={node.path}
                 title={tipOf(node)}
                 {...pressable(() => open(node), { role: null, space: false })}
+                draggable
+                onDragStart={(e) => {
+                  /** 拖的是没选中的那项就先把它选中：跟资源管理器一样，拖这一下就是选它这一下 */
+                  const paths = selected.includes(node.path) ? [...selected] : [node.path];
+                  /** 里面哪几项是目录：落到标签上开标签/分栏靠它 */
+                  const dirs = col.nodes.filter((n) => n.isDir && paths.includes(n.path)).map((n) => n.path);
+                  if (!selected.includes(node.path)) void pickIn(panelId, index, node.path, "select", visiblePaths);
+                  setDragFiles({ paths, dirs, sourceDir: col.path });
+                  e.dataTransfer.effectAllowed = "copyMove";
+                  e.dataTransfer.setData("text/plain", paths.join("\r\n"));
+                }}
+                onDragEnd={() => {
+                  setDragFiles(null);
+                  setDropPath(null);
+                  setOverCol(false);
+                }}
+                /** 目录行自己就是落点：别的文件停在这儿，就是放进这个目录 */
+                onDragOver={
+                  node.isDir
+                    ? (e) => {
+                        const d = useFilesStore.getState().dragFiles;
+                        if (!d || !canDropInto(d.paths, node.path)) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.dataTransfer.dropEffect = dropMode(d.sourceDir, node.path, e);
+                        setOverCol(false);
+                        setDropPath((p) => (p === node.path ? p : node.path));
+                      }
+                    : undefined
+                }
+                onDragLeave={
+                  node.isDir
+                    ? (e) => {
+                        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                        setDropPath((p) => (p === node.path ? null : p));
+                      }
+                    : undefined
+                }
+                onDrop={
+                  node.isDir
+                    ? (e) => {
+                        if (!useFilesStore.getState().dragFiles) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDropPath(null);
+                        void dropInto(node.path, e);
+                      }
+                    : undefined
+                }
                 onClick={(e) => {
                   const mode = e.shiftKey ? "range" : e.ctrlKey || e.metaKey ? "toggle" : "single";
                   void pickIn(panelId, index, node.path, mode, visiblePaths);
@@ -139,23 +237,17 @@ export default function FileColumn({
                     </span>
                   )}
                 </span>
-                <Pencil
-                  className="icon-button row-edit"
-                  size={14}
-                  aria-label={`编辑「${node.name}」`}
-                  {...pressable(() => onEdit(node))}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEdit(node);
-                  }}
-                  // 这一行双击是「打开」，不拦一下就会在编辑按钮上按两下顺手把文件也开了
-                  onDoubleClick={(e) => e.stopPropagation()}
-                />
               </div>
             );
           })
         )}
       </div>
+      {band && (
+        <div
+          className="file-band"
+          style={{ left: band.left, top: band.top, width: band.width, height: band.height }}
+        />
+      )}
     </div>
   );
 }

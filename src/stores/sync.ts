@@ -10,7 +10,7 @@ import { useTotpStore } from "./totp";
 
 type Reload = () => Promise<void>;
 
-/** 文件页浏览的是整台机器，没有「哪些目录算我的」这层名单了：脏了就把几个标签停着的目录重读一遍 */
+/** 文件页浏览的是整台机器，没有「哪些目录算我的」这层名单了：脏了就把当前看得到的那几颗标签重读一遍 */
 async function reloadFiles(): Promise<void> {
   await useFilesStore.getState().reloadTabs();
 }

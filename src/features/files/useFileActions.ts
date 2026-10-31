@@ -65,5 +65,19 @@ export default function useFileActions() {
     await run(() => useFilesStore.getState().refreshActive());
   };
 
-  return { copy, cut, paste, remove, refresh };
+  /** Ctrl+Z：文件写操作的反向播放。删除这种后端还原不了的，只回一句实话 */
+  const undo = async () => {
+    try {
+      const res = await useFilesStore.getState().undoLast();
+      if (!res) {
+        message.info("没有可以撤销的操作");
+        return;
+      }
+      (res.ok ? message.success : message.info)(res.text);
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  return { copy, cut, paste, remove, refresh, undo };
 }

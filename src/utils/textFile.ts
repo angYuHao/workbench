@@ -83,38 +83,3 @@ export function languageOf(name: string): string | null {
   return LANGUAGES[dot < 0 ? lower : lower.slice(dot + 1)] ?? null;
 }
 
-/** asset 协议会把整个文件推过来，读流读到上限就停，避免手滑点开一个几百 MB 的日志 */
-export async function readCapped(url: string, limit = MAX_TEXT_BYTES): Promise<{ bytes: Uint8Array; truncated: boolean }> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`读取失败：HTTP ${res.status}`);
-  if (!res.body) {
-    const buf = await res.arrayBuffer();
-    return { bytes: new Uint8Array(buf, 0, Math.min(buf.byteLength, limit)), truncated: buf.byteLength > limit };
-  }
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let truncated = false;
-  while (total < limit) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    const room = limit - total;
-    if (value.byteLength > room) {
-      chunks.push(value.subarray(0, room));
-      total += room;
-      truncated = true;
-      break;
-    }
-    chunks.push(value);
-    total += value.byteLength;
-  }
-  if (truncated) await reader.cancel().catch(() => undefined);
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const c of chunks) {
-    out.set(c, at);
-    at += c.byteLength;
-  }
-  return { bytes: out, truncated };
-}

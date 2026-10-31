@@ -1,8 +1,8 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { Empty, Spin, Tag } from "../../ui";
+import { readFileHead } from "../../api/files";
 import { PreviewError } from "./PreviewError";
-import { MAX_TEXT_BYTES, decodeText, languageOf, readCapped } from "../../utils/textFile";
+import { MAX_TEXT_BYTES, decodeText, languageOf } from "../../utils/textFile";
 
 type State =
   | { status: "loading" }
@@ -24,7 +24,7 @@ export default function TextPreview({ path, name }: { path: string; name: string
     let alive = true;
     setState({ status: "loading" });
     (async () => {
-      const { bytes, truncated } = await readCapped(convertFileSrc(path));
+      const { bytes, truncated } = await readFileHead(path, MAX_TEXT_BYTES);
       if (!alive) return;
       const decoded = decodeText(bytes);
       if (!decoded) {

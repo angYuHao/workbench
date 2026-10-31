@@ -4,6 +4,7 @@ import { useFilesStore } from "../../stores/files";
 import type { Clipboard, FilePanel as FilePanelShape } from "../../stores/files";
 import useFileActions from "./useFileActions";
 import FileColumn from "./FileColumn";
+import PanelTabs from "./PanelTabs";
 import { visibleNodes } from "./listing";
 import { sortLabel } from "../../utils/sort";
 import { formatBytes } from "../../utils/humanize";
@@ -66,6 +67,8 @@ export default function FilePanel({
   const actions = useFileActions();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const millerRef = useRef<HTMLDivElement>(null);
+  /** 有标签正被拖着：每一栏的列区都变成「拖进来的话，就在这栏右边拆一栏」的落点 */
+  const dragTab = useFilesStore((s) => s.dragTab);
 
   const visible = useMemo(() => (col ? visibleNodes(col) : []), [col]);
   /** 连选和全选都按筛过的这串算：搜索框里缩到 3 项时 Ctrl+A 不该把没显示的那几百项也选上 */
@@ -200,7 +203,30 @@ export default function FilePanel({
       onFocusCapture={onActivate}
       onKeyDown={onKeyDown}
     >
-      <div className="miller" ref={millerRef}>
+      <PanelTabs panel={panel} />
+
+      <div
+        className="miller"
+        ref={millerRef}
+        onDragOver={
+          dragTab
+            ? (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+              }
+            : undefined
+        }
+        onDrop={
+          dragTab
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const d = useFilesStore.getState().dragTab;
+                if (d) void useFilesStore.getState().splitTabToNewPanel(d.panelId, d.tabId, panel.id);
+              }
+            : undefined
+        }
+      >
         {tab?.cols.map((c, i) => (
           <FileColumn
             key={c.id}
@@ -210,11 +236,15 @@ export default function FilePanel({
             focused={i === focusIndex}
             detail={detail}
             icons={icons}
-            onEdit={onEdit}
             onMenu={setMenu}
             onActivate={onActivate}
           />
         ))}
+        {dragTab && (
+          <div className="miller-split-drop">
+            <span>松开：在这栏右边拆出一栏</span>
+          </div>
+        )}
       </div>
 
       <div className="file-status">

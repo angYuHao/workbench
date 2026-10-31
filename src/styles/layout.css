@@ -19,6 +19,8 @@
   gap: var(--p-gap);
   padding: var(--p-pad) var(--p-pad-lg);
   border-bottom: 1px solid var(--color-border);
+  /** 工具页没有侧栏，这条工具栏就是内容区的一部分，跟下面的白底接成一片 */
+  background: var(--color-card);
 }
 
 .toolbar-title {
@@ -48,13 +50,6 @@
   margin-bottom: var(--p-pad);
 }
 
-/* 字号跟着密度走（原来那类 18px 写死的写法在新栏里不再复制一份） */
-.card-bar-title {
-  margin: 0;
-  font-size: calc(var(--p-font) + 2px);
-  font-weight: 600;
-}
-
 .panes {
   display: flex;
   flex: 1;
@@ -74,7 +69,9 @@
   min-width: 0;
   padding: var(--p-pad-lg);
   overflow: auto;
-  /** 背景质感（渐染/细网格/颗粒）落在这一层，卡片压在上面才有前后关系 */
+  /** 内容区用卡片白当底：四个页面右半边不再跟主题底色一起发色。
+      质感（渐染/细网格/颗粒）仍叠在这一层，卡片靠阴影浮起来 */
+  background: var(--color-card);
   background-image: var(--p-texture);
 }
 

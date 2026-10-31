@@ -42,7 +42,7 @@ const SECTIONS = [
     key: "blacklist",
     group: "网页",
     label: "网址黑名单",
-    desc: "命中的网址不在网页管理里显示，导入收藏夹时也会跳过",
+    desc: "命中的网址不在网页里显示，导入收藏夹时也会跳过",
     icon: Ban,
     words: "黑名单 屏蔽 拉黑 域名 网址 black list",
   },

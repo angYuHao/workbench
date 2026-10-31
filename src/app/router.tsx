@@ -13,9 +13,9 @@ export const router = createHashRouter([
     path: "/",
     element: <AppLayout />,
     children: [
-      { index: true, element: <AppsView /> },
+      { index: true, element: <FilesView /> },
+      { path: "apps", element: <AppsView /> },
       { path: "bookmarks", element: <BookmarksView /> },
-      { path: "files", element: <FilesView /> },
       { path: "tools", element: <ToolsView /> },
       { path: "tools/:toolId", element: <ToolsView /> },
     ],
