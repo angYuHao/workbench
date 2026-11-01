@@ -146,7 +146,7 @@ export default function PanelTabs({ panel }: { panel: FilePanelShape }) {
                   e.stopPropagation();
                   setSplitOver(null);
                   useFilesStore.getState().setDragFiles(null);
-                  void splitDirToNewPanel(droppedDir, panel.id);
+                  void splitDirToNewPanel(droppedDir, panel.id, "right");
                 }
               : undefined
           }

@@ -84,6 +84,8 @@ grep -c 'commands::' src/lib.rs
 
 窗口 hide/show 全在 Rust 侧：capabilities 里只有 `core:window:default`，JS 侧根本调不动（`window.hide()` 会被拒）。托盘那条路留着当兜底——抽屉模式下窗口没有标题栏，「退出」只剩托盘菜单。
 
+**关掉托盘开关之后，关主窗口必须自己 `exit(0)`**（`lib.rs` 的 `on_window_event`）。tauri 的自动退出判的是「窗口表里一个都不剩」，而 `windows` 里除了 `main` 还常驻着 `drawer` 那条隐藏窗口（配置里 `create` 默认 true，只 hide 从不 destroy），所以主窗口关掉之后表永远不空：进程留在后台、托盘图标又已经摘掉、界面再也叫不回来，而单实例锁还在它手上——再双击启动只会让新进程静默退出。这条退出规则是抽屉从主窗口里拆成独立窗口之后才失效的。
+
 ## 密钥与隐私边界
 
 - `ai_models.key_enc`、`totp_accounts.secret_enc` 是当前 Windows 用户的 DPAPI 密文：换机换用户解不开，任何接口都不回传密钥，只在内存里短暂出现。

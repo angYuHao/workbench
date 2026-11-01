@@ -37,6 +37,12 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if tray::hide_to_tray(window.app_handle()) {
                     api.prevent_close();
+                } else if window.label() == "main" {
+                    // 关到托盘这条路没走成（用户把那个开关关了）就得自己退。
+                    // 不能指望「最后一个窗口关了进程就退」：顶边抽屉是配置里另一个窗口，
+                    // 主窗口关掉之后窗口表里还剩它，那条规则永远等不到 —— 结果是进程留在后台、
+                    // 托盘图标又已经摘掉，界面再也叫不回来，连重新双击启动都会被单实例锁挡掉
+                    window.app_handle().exit(0);
                 }
             }
         })
@@ -78,8 +84,11 @@ pub fn run() {
                 tray::install(app.handle())?;
             }
 
-            // 顶边抽屉：没写过这个键就算开。第一次跑（库里压根没这条）先把窗口显示一次，
-            // 不然装完点开啥也没看见，只会以为程序没起来
+            // 顶边抽屉：没写过这个键就算开。
+            // 主窗口在配置里是 visible:false —— 那是给「抽屉开着、顶边一划就有入口」那种常态用的。
+            // 但入口全关掉的时候必须自己把它显出来，否则启动完就是一个看不见的进程：
+            // 第一次跑（库里压根没 edge_drawer 这条，装完点开啥也没看见只会以为没启动起来），
+            // 以及抽屉和托盘两个入口都不在了（只剩托盘时藏在托盘里是正常用法，不动它）
             let conn = app_state.conn();
             let edge = services::settings::get_setting(&conn, "edge_drawer")
                 .ok()
@@ -87,7 +96,7 @@ pub fn run() {
             drop(conn);
             let drawer_on = edge.as_deref() != Some("0");
             drawer::apply(app.handle(), drawer_on);
-            if edge.is_none() {
+            if edge.is_none() || (!drawer_on && tray_off) {
                 drawer::reveal_once(app.handle());
             }
             drawer::start(app.handle());

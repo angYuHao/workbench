@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Columns2, Eye, Folder, HardDrive, Pin, Server, X } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useFilesStore } from "../../stores/files";
+import { groupRows, useFilesStore } from "../../stores/files";
 import FileHeader from "./FileHeader";
 import FilePanel from "./FilePanel";
 import { EmptyPanelTabs } from "./PanelTabs";
@@ -16,8 +16,9 @@ import { folderName } from "../../utils/paths";
 import { Button, Form, FormItem, Input, Modal, Switch, TextArea, message, pressable, useForm } from "../../ui";
 import type { FileNode } from "../../types";
 
-/** 侧栏一行：点它就是在当前标签里换过去，和地址栏面包屑一样，不叠新标签。
-    要另开一个标签走标签条上的 `+`，或者把文件夹拖到标签条上 */
+/** 侧栏一行：点它是在这一栏**新开一个标签**，当前那颗标签原样留着不动。
+    这一栏里已经有标签停在这个目录上时不叠第二颗，直接跳过去。
+    想在当前标签里换地方，用上面那条地址栏 */
 function SideItem({
   path,
   label,
@@ -110,7 +111,7 @@ export default function FilesView() {
     authorizedFor,
     clipboard,
     boot,
-    enter,
+    openTab,
     addPanel,
     activatePanel,
     setPanelWidth,
@@ -202,6 +203,8 @@ export default function FilesView() {
 
   /** 预览跟着「当前栏、当前标签、当前列单选的那一项」走：点别的列会先把焦点挪过去 */
   const activePanel = panels.find((p) => p.id === activePanelId) ?? null;
+  /** 栏按横带分组：上下拆出来的栏各占一条带，一条带里再横向并排 */
+  const rows = groupRows(panels);
   const activeTab = activePanel?.tabs.find((t) => t.id === activePanel.activeTabId) ?? null;
   const activeCol = activeTab
     ? activeTab.cols[Math.min(Math.max(activeTab.focus, 0), activeTab.cols.length - 1)]
@@ -248,7 +251,7 @@ export default function FilesView() {
     message.success(already ? "已从收藏移除" : "已收藏到侧栏");
   };
 
-  const open = (path: string) => void enter(path);
+  const open = (path: string) => void openTab(path);
 
   return (
     <div className="page">
@@ -333,23 +336,32 @@ export default function FilesView() {
           {!panels.length && <EmptyPanelTabs />}
 
           <div className="file-panes">
-            <div className="file-columns">
-              {panels.map((p, i) => (
-                <Fragment key={p.id}>
-                  {i > 0 && <div className="divider-v" onMouseDown={(e) => startColumnResize(e, panels[i - 1].id)} />}
-                  <FilePanel
-                    panel={p}
-                    active={p.id === activePanelId}
-                    previewOpen={!!previewNode}
-                    pinned={pinned}
-                    clipboard={clipboard}
-                    icons={icons}
-                    onActivate={() => void activatePanel(p.id)}
-                    onEdit={setEdit}
-                    onRename={openRename}
-                    onNewFolder={openNewFolder}
-                    registerRef={registerPanel(p.id)}
-                  />
+            <div className="file-rows">
+              {rows.map((row, ri) => (
+                <Fragment key={row[0].id}>
+                  {ri > 0 && <div className="divider-h" />}
+                  <div className="file-columns">
+                    {row.map((p, i) => (
+                      <Fragment key={p.id}>
+                        {i > 0 && (
+                          <div className="divider-v" onMouseDown={(e) => startColumnResize(e, row[i - 1].id)} />
+                        )}
+                        <FilePanel
+                          panel={p}
+                          active={p.id === activePanelId}
+                          previewOpen={!!previewNode}
+                          pinned={pinned}
+                          clipboard={clipboard}
+                          icons={icons}
+                          onActivate={() => void activatePanel(p.id)}
+                          onEdit={setEdit}
+                          onRename={openRename}
+                          onNewFolder={openNewFolder}
+                          registerRef={registerPanel(p.id)}
+                        />
+                      </Fragment>
+                    ))}
+                  </div>
                 </Fragment>
               ))}
               {!panels.length && (

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useFilesStore } from "../../stores/files";
-import type { Clipboard, FilePanel as FilePanelShape } from "../../stores/files";
+import type { Clipboard, FilePanel as FilePanelShape, SplitSide } from "../../stores/files";
 import useFileActions from "./useFileActions";
 import FileColumn from "./FileColumn";
 import PanelTabs from "./PanelTabs";
@@ -36,6 +36,31 @@ function driveOf(path: string | null, drives: DriveInfo[]): DriveInfo | null {
   return drives.find((d) => p.startsWith(d.path.toLowerCase())) ?? null;
 }
 
+/** 落点：四个方位拆栏，正中是并进这一栏（和 VSCode 拖编辑器一个规矩） */
+type DropSide = SplitSide | "center";
+
+/** 贴着边多远算「要靠边拆」。中间那一块留给「并进这一栏」 */
+const EDGE = 0.28;
+
+const ZONE_TEXT: Record<DropSide, string> = {
+  left: "松开：在这一栏左边拆一栏",
+  right: "松开：在这一栏右边拆一栏",
+  top: "松开：在这一栏上边拆一栏",
+  bottom: "松开：在这一栏下边拆一栏",
+  center: "松开：并进这一栏",
+};
+
+/** 指针落在这一栏的哪一块。量的是整栏（含标签条和状态条），跟蒙层画的框是同一套坐标 */
+function zoneOf(rect: DOMRect, clientX: number, clientY: number): DropSide {
+  const rx = (clientX - rect.left) / rect.width;
+  const ry = (clientY - rect.top) / rect.height;
+  if (ry < EDGE) return "top";
+  if (ry > 1 - EDGE) return "bottom";
+  if (rx < EDGE) return "left";
+  if (rx > 1 - EDGE) return "right";
+  return "center";
+}
+
 export default function FilePanel({
   panel,
   active,
@@ -67,8 +92,14 @@ export default function FilePanel({
   const actions = useFileActions();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const millerRef = useRef<HTMLDivElement>(null);
-  /** 有标签正被拖着：每一栏的列区都变成「拖进来的话，就在这栏右边拆一栏」的落点 */
+  /** 有标签正被拖着：每一栏都变成落点，靠边拆栏、正中并栏 */
   const dragTab = useFilesStore((s) => s.dragTab);
+  /** 这一次划过停在哪个方位上。蒙层照它画，松手也按它办 */
+  const [dropSide, setDropSide] = useState<DropSide | null>(null);
+
+  useEffect(() => {
+    if (!dragTab) setDropSide(null);
+  }, [dragTab]);
 
   const visible = useMemo(() => (col ? visibleNodes(col) : []), [col]);
   /** 连选和全选都按筛过的这串算：搜索框里缩到 3 项时 Ctrl+A 不该把没显示的那几百项也选上 */
@@ -202,31 +233,46 @@ export default function FilePanel({
       /** Tab 走到这一栏里也算「到了这一栏」：不然键盘选中的文件全跑到预览栏外面去了 */
       onFocusCapture={onActivate}
       onKeyDown={onKeyDown}
+      /** 拖标签划过这一栏：靠边报方位、正中报并进。用 capture 是因为标签条那一条自己有落点
+          （并栏）并且会 stopPropagation —— 冒泡阶段收不到的话，指针划到标签条上蒙层就僵在原地了 */
+      onDragOverCapture={(e) => {
+        const d = useFilesStore.getState().dragTab;
+        if (!d) return;
+        if ((e.target as HTMLElement | null)?.closest?.(".panel-tabs")) {
+          if (dropSide) setDropSide(null);
+          return;
+        }
+        const rect = e.currentTarget.getBoundingClientRect();
+        const side = zoneOf(rect, e.clientX, e.clientY);
+        /** 拖回自己这一栏的正中间 = 把它并进它自己，没这件事 */
+        if (side === "center" && d.panelId === panel.id) {
+          if (dropSide) setDropSide(null);
+          return;
+        }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (side !== dropSide) setDropSide(side);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDropSide(null);
+      }}
+      onDrop={(e) => {
+        const d = useFilesStore.getState().dragTab;
+        if (!d) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const side = dropSide ?? zoneOf(rect, e.clientX, e.clientY);
+        e.preventDefault();
+        e.stopPropagation();
+        setDropSide(null);
+        const s = useFilesStore.getState();
+        if (side === "center") void s.moveTabToPanel(d.panelId, d.tabId, panel.id);
+        else void s.splitTab(d.panelId, d.tabId, panel.id, side);
+      }}
     >
       <PanelTabs panel={panel} />
 
-      <div
-        className="miller"
-        ref={millerRef}
-        onDragOver={
-          dragTab
-            ? (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-              }
-            : undefined
-        }
-        onDrop={
-          dragTab
-            ? (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const d = useFilesStore.getState().dragTab;
-                if (d) void useFilesStore.getState().splitTabToNewPanel(d.panelId, d.tabId, panel.id);
-              }
-            : undefined
-        }
-      >
+      <div className="miller" ref={millerRef}>
         {tab?.cols.map((c, i) => (
           <FileColumn
             key={c.id}
@@ -240,11 +286,6 @@ export default function FilePanel({
             onActivate={onActivate}
           />
         ))}
-        {dragTab && (
-          <div className="miller-split-drop">
-            <span>松开：在这栏右边拆出一栏</span>
-          </div>
-        )}
       </div>
 
       <div className="file-status">
@@ -261,6 +302,16 @@ export default function FilePanel({
           </span>
         )}
       </div>
+
+      {/* 蒙层：整栏压暗，只有要落的那一块亮起来 —— 松手之后屏幕会变成什么样，先照给你看。
+          pointer-events:none，事件照样落到下面那一栏的 onDragOver 上 */}
+      {dragTab && dropSide && (
+        <div className="panel-drop-mask" aria-hidden>
+          <div className={`panel-drop-zone is-${dropSide}`}>
+            <span>{ZONE_TEXT[dropSide]}</span>
+          </div>
+        </div>
+      )}
 
       <ContextMenu at={active ? menu : null} items={menuItems()} onClose={() => setMenu(null)} />
     </div>

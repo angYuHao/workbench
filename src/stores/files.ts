@@ -59,6 +59,9 @@ export interface FilePanel {
   activeTabId: string;
   /** 拖过分栏才有像素宽；null 表示和别的栏一起等分剩下的地方 */
   width: number | null;
+  /** 同一个 rowId 的栏并排在同一条横带里。上下拆出来的栏拿一个新 rowId，
+      于是它自己占一条带，横向那套栏宽规则在它这条带里另算一遍 */
+  rowId: string;
 }
 
 /** 系统剪贴板上的那串文件在界面这边的镜像：状态条和右键菜单靠它知道「有东西可粘」 */
@@ -110,6 +113,8 @@ interface SavedPanel {
   tabs: SavedTab[];
   activeIndex: number;
   width?: number | null;
+  /** 第几条横带；老布局没这个字段，读进来一律算第 0 条（也就是只有一横带） */
+  row?: number;
 }
 
 interface SavedLayout {
@@ -150,9 +155,60 @@ function makeTab(path: string): FileTab {
   };
 }
 
-function makePanel(path: string): FilePanel {
+/** 拖标签落在某一栏的哪个方位：上下另起一条横带，左右并进那一栏所在的那条 */
+export type SplitSide = "left" | "right" | "top" | "bottom";
+
+function makePanel(path: string, rowId: string): FilePanel {
   const tab = makeTab(path);
-  return { id: nextId("panel"), tabs: [tab], activeTabId: tab.id, width: null };
+  return { id: nextId("panel"), tabs: [tab], activeTabId: tab.id, width: null, rowId };
+}
+
+/** 把 created 按方位插进 panels。左右贴着目标栏，上下贴着目标栏那条横带的首/尾 */
+function insertPanel(
+  panels: FilePanel[],
+  created: FilePanel,
+  toPanelId: string,
+  side: SplitSide,
+): FilePanel[] {
+  const at = panels.findIndex((p) => p.id === toPanelId);
+  if (at < 0) return [...panels, created];
+  const next = [...panels];
+  if (side === "left") {
+    next.splice(at, 0, created);
+    return next;
+  }
+  if (side === "right") {
+    next.splice(at + 1, 0, created);
+    return next;
+  }
+  const here = panels[at].rowId;
+  if (side === "top") {
+    next.splice(next.findIndex((p) => p.rowId === here), 0, created);
+    return next;
+  }
+  let last = at;
+  for (let i = 0; i < next.length; i += 1) {
+    if (next[i].rowId === here) last = i;
+  }
+  next.splice(last + 1, 0, created);
+  return next;
+}
+
+/** 把平铺的栏按 rowId 分带：带的先后 = 第一次出现的顺序，带内 = 数组顺序。
+    渲染按这个结果一条一条横带画，界面那边不再自己拼布局 */
+export function groupRows(panels: FilePanel[]): FilePanel[][] {
+  const rows: FilePanel[][] = [];
+  const at = new Map<string, number>();
+  for (const p of panels) {
+    let i = at.get(p.rowId);
+    if (i === undefined) {
+      i = rows.length;
+      at.set(p.rowId, i);
+      rows.push([]);
+    }
+    rows[i].push(p);
+  }
+  return rows;
 }
 
 /** 当前列。focus 可能因为收列滞后一格，按列数夹一下 */
@@ -161,6 +217,11 @@ function focusedCol(tab: FileTab): FileColumn {
 }
 
 function toSavedLayout(panels: FilePanel[], activePanelId: string | null): SavedLayout {
+  /** 横带按「第一次出现」编号存：栏本身还是平铺一个数组，读回来照 row 分组即可 */
+  const rowIndex = new Map<string, number>();
+  for (const p of panels) {
+    if (!rowIndex.has(p.rowId)) rowIndex.set(p.rowId, rowIndex.size);
+  }
   return {
     panels: panels.map((p) => ({
       tabs: p.tabs.map((t) => ({
@@ -176,6 +237,7 @@ function toSavedLayout(panels: FilePanel[], activePanelId: string | null): Saved
       })),
       activeIndex: Math.max(0, p.tabs.findIndex((t) => t.id === p.activeTabId)),
       width: p.width,
+      row: rowIndex.get(p.rowId) ?? 0,
     })),
     activeIndex: Math.max(0, panels.findIndex((p) => p.id === activePanelId)),
   };
@@ -256,11 +318,12 @@ interface FilesStore {
   setDragTab: (drag: { panelId: string; tabId: string } | null) => void;
   /** 标签拖进另一栏的标签条：并进那一栏；目标栏里已经有同目录的标签就直接切过去 */
   moveTabToPanel: (fromPanelId: string, tabId: string, toPanelId: string) => Promise<void>;
-  /** 标签拖到某一栏的列区：在这一栏右边拆出一栏，只装这颗标签 */
-  splitTabToNewPanel: (fromPanelId: string, tabId: string, afterPanelId: string) => Promise<void>;
+  /** 标签拖到某一栏的列区：按落点方位拆栏 —— 上下另起一条横带，左右并进那一栏那条带。
+      落在正被拖的那颗标签所在的栏正中间等于什么都没变，那里不接 */
+  splitTab: (fromPanelId: string, tabId: string, toPanelId: string, side: SplitSide) => Promise<void>;
   setDragFiles: (drag: { paths: string[]; sourceDir: string; dirs: string[] } | null) => void;
-  /** 把某个目录作为新的一栏，摆在 afterPanelId 右边 */
-  splitDirToNewPanel: (path: string, afterPanelId: string) => Promise<void>;
+  /** 把某个目录作为新的一栏，按落点方位摆在 toPanelId 旁边 */
+  splitDirToNewPanel: (path: string, toPanelId: string, side: SplitSide) => Promise<void>;
   /** 框选：hits 是框住的那串，additive 时并进按下框那一刻的 base，不并就别管以前选了啥 */
   selectPathsIn: (
     panelId: string,
@@ -541,7 +604,7 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       await reroot(fallback.id, target.id, path);
       return;
     }
-    const created = makePanel(path);
+    const created = makePanel(path, nextId("row"));
     set((state) => ({ panels: [...state.panels, created], activePanelId: created.id }));
     settle();
     await loadTabColumns(created.id, created.activeTabId);
@@ -626,7 +689,8 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       set({ drives, knownFolders, pinned, showHidden });
 
       const saved = parseLayout(settings[LAYOUT_KEY]);
-      const panels: FilePanel[] = [];
+      /** 先按读到的顺序把栏建出来，再按 row 分带 —— 老布局没 row，全部落在第 0 带，等于以前那一横排 */
+      const restored: { panel: Omit<FilePanel, "rowId">; row: number }[] = [];
       if (saved) {
         for (const p of saved.panels) {
           const tabs: FileTab[] = [];
@@ -658,13 +722,34 @@ export const useFilesStore = create<FilesStore>((set, get) => {
           }
           if (!tabs.length) continue;
           const index = Math.min(Math.max(0, p.activeIndex), tabs.length - 1);
-          panels.push({ id: nextId("panel"), tabs, activeTabId: tabs[index].id, width: p.width ?? null });
+          restored.push({
+            panel: { id: nextId("panel"), tabs, activeTabId: tabs[index].id, width: p.width ?? null },
+            row: p.row ?? 0,
+          });
         }
       }
+      /** 分带：同一个 row 的栏共用一个 rowId，带的先后按 row 数排（sort 是稳定的，带内顺序不变）。
+          当前栏按下标存过，这里跟着一起搬，别在重排之后还按老下标找 */
+      const panels: FilePanel[] = [];
+      const rowIds = new Map<number, string>();
+      const order = restored
+        .map((_, i) => i)
+        .sort((a, b) => restored[a].row - restored[b].row);
+      const activeIndex = saved ? Math.min(Math.max(0, saved.activeIndex), restored.length - 1) : -1;
+      let activePanelId: string | null = null;
+      for (const i of order) {
+        let rowId = rowIds.get(restored[i].row);
+        if (!rowId) {
+          rowId = nextId("row");
+          rowIds.set(restored[i].row, rowId);
+        }
+        panels.push({ ...restored[i].panel, rowId });
+        if (i === activeIndex) activePanelId = restored[i].panel.id;
+      }
       const first = firstPlace(pinned, knownFolders, drives);
-      if (!panels.length && first) panels.push(makePanel(first));
+      if (!panels.length && first) panels.push(makePanel(first, nextId("row")));
       /** 这里不 settle：布局本来就是刚从库里读回来的，再写一遍只是给别的窗口发一发空广播 */
-      set({ panels, activePanelId: panels[0]?.id ?? null });
+      set({ panels, activePanelId: activePanelId ?? panels[0]?.id ?? null });
       /** 只读每栏当前那颗标签：上次退出时挂着的后台标签等切过去再读，
           否则标签一多，启动就要把几十个目录同时扫一遍 */
       await Promise.all(panels.map((p) => loadTabColumns(p.id, p.activeTabId)));
@@ -697,7 +782,7 @@ export const useFilesStore = create<FilesStore>((set, get) => {
     openTabIn: async (panelId, path) => {
       const panel = get().panels.find((p) => p.id === panelId);
       if (!panel) {
-        const created = makePanel(path);
+        const created = makePanel(path, nextId("row"));
         set((state) => ({ panels: [...state.panels, created], activePanelId: created.id }));
         settle();
         await loadTabColumns(created.id, created.activeTabId);
@@ -811,8 +896,10 @@ export const useFilesStore = create<FilesStore>((set, get) => {
         drives.find((d) => !shown.has(d.path))?.path ??
         firstPlace(pinned, knownFolders, drives);
       if (!candidate) return;
-      const created = makePanel(candidate);
-      set((state) => ({ panels: [...state.panels, created], activePanelId: created.id }));
+      /** 「新建分栏」还是老手感：排在当前栏右边、跟它同一条横带。一条带都没有才新起一条 */
+      const anchor = panels.find((p) => p.id === get().activePanelId) ?? panels[panels.length - 1] ?? null;
+      const created = makePanel(candidate, anchor?.rowId ?? nextId("row"));
+      set({ panels: anchor ? insertPanel(panels, created, anchor.id, "right") : [...panels, created], activePanelId: created.id });
       settle();
       await loadTabColumns(created.id, created.activeTabId);
     },
@@ -869,43 +956,46 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       if (sourceNextId) await loadTabColumns(from.id, sourceNextId);
       await syncPreview();
     },
-    splitTabToNewPanel: async (fromPanelId, tabId, afterPanelId) => {
+    splitTab: async (fromPanelId, tabId, toPanelId, side) => {
       const { panels } = get();
       const from = panels.find((p) => p.id === fromPanelId);
+      const to = panels.find((p) => p.id === toPanelId);
       const index = from?.tabs.findIndex((t) => t.id === tabId) ?? -1;
-      if (!from || index < 0) return;
+      if (!from || !to || index < 0) return;
       const tab = from.tabs[index];
       const rest = from.tabs.filter((t) => t.id !== tabId);
+      /** 源栏就这一颗标签、又落回它自己身上：挪出来还是原地那一颗，什么都不用做 */
+      if (from.id === to.id && !rest.length) {
+        set({ dragTab: null });
+        return;
+      }
       const sourceNextId =
         rest.length && from.activeTabId === tabId ? rest[Math.min(index, rest.length - 1)].id : null;
-      const created: FilePanel = { id: nextId("panel"), tabs: [tab], activeTabId: tab.id, width: null };
-      const next: FilePanel[] = [];
+      const created: FilePanel = {
+        id: nextId("panel"),
+        tabs: [tab],
+        activeTabId: tab.id,
+        width: null,
+        /** 上下另起一条横带 → 新 rowId；左右并进目标栏那条带 → 跟它共用 rowId */
+        rowId: side === "top" || side === "bottom" ? nextId("row") : to.rowId,
+      };
+      /** 先从源栏摘掉这颗（源栏被摘空就整栏消失），再按方位插进目标位置 */
+      const stripped: FilePanel[] = [];
       for (const p of panels) {
-        if (p.id === from.id) {
-          /** 这颗标签是源栏的最后一颗时，源栏直接消失，别留一条空壳 */
-          if (!rest.length) continue;
-          next.push({
-            ...p,
-            tabs: rest,
-            activeTabId: from.activeTabId === tabId ? rest[Math.min(index, rest.length - 1)].id : p.activeTabId,
-          });
+        if (p.id !== from.id) {
+          stripped.push(p);
           continue;
         }
-        next.push(p);
+        if (!rest.length) continue;
+        stripped.push({
+          ...p,
+          tabs: rest,
+          activeTabId: from.activeTabId === tabId ? rest[Math.min(index, rest.length - 1)].id : p.activeTabId,
+        });
       }
-      let at: number;
-      if (afterPanelId !== fromPanelId) {
-        const found = next.findIndex((p) => p.id === afterPanelId);
-        at = found >= 0 ? found + 1 : next.length;
-      } else {
-        const found = next.findIndex((p) => p.id === fromPanelId);
-        /** 源栏还留着：新栏排在它右边。源栏被拆空了：新栏就顶在它原来的位置 */
-        at = found >= 0 ? found + 1 : Math.min(Math.max(panels.findIndex((p) => p.id === fromPanelId), 0), next.length);
-      }
-      next.splice(at, 0, created);
-      set({ panels: next, activePanelId: created.id, dragTab: null });
+      set({ panels: insertPanel(stripped, created, to.id, side), activePanelId: created.id, dragTab: null });
       settle();
-      /** 拆出来的标签可能来自后台、内容还没读过；源栏顶替上来的那颗同理 */
+      /** 拆出来的标签可能一直在后台、内容还没读过；源栏顶替上来的那颗同理 */
       await loadTabColumns(created.id, tab.id);
       if (sourceNextId) await loadTabColumns(from.id, sourceNextId);
       await syncPreview();
@@ -913,15 +1003,11 @@ export const useFilesStore = create<FilesStore>((set, get) => {
     setDragFiles: (drag) => {
       set({ dragFiles: drag });
     },
-    splitDirToNewPanel: async (path, afterPanelId) => {
-      const created = makePanel(path);
-      set((state) => {
-        const at = state.panels.findIndex((p) => p.id === afterPanelId);
-        const next = [...state.panels];
-        /** 落在某一栏的标签上：新栏就摆在那一栏右边 */
-        next.splice(at >= 0 ? at + 1 : next.length, 0, created);
-        return { panels: next, activePanelId: created.id };
-      });
+    splitDirToNewPanel: async (path, toPanelId, side) => {
+      const { panels } = get();
+      const to = panels.find((p) => p.id === toPanelId) ?? null;
+      const created = makePanel(path, side === "top" || side === "bottom" ? nextId("row") : to?.rowId ?? nextId("row"));
+      set({ panels: to ? insertPanel(panels, created, to.id, side) : [...panels, created], activePanelId: created.id });
       settle();
       await loadTabColumns(created.id, created.activeTabId);
       await syncPreview();

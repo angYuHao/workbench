@@ -264,15 +264,31 @@
   padding: 10px 8px 2px;
 }
 
-/* 几栏并排占掉侧栏和预览栏之间的地方；栏宽由 .file-panel 上的内联 style 给，
-   没拖过分栏的就是 1 1 0（等分），拖过的按像素走但仍允许被 flex 夹短。
-   预览栏记的是上次拖出来的像素宽，窗口变小或那个宽度太大时，这里用 400 的底兜住——
-   不然文件栏会被压成一条缝，标签、工具栏全挤成竖排 */
-.file-columns {
+/* 侧栏和预览栏之间那一大片：先按横带纵向切（上下拆出来的栏各占一条带），
+   一条带里再横向并排。整块的 400 底线记在这里 —— 窗口太小时宁可让带里横滚，
+   也别把文件栏压成一条缝，标签、工具栏全挤成竖排 */
+.file-rows {
   display: flex;
+  flex-direction: column;
   flex: 1 1 400px;
   min-width: 400px;
-  /* 分栏多到这一块放不下时横向滚，别让右边那栏被压到预览栏底下去 */
+  min-height: 0;
+}
+
+/* 两条横带之间的缝。上下拆栏现在只是等分这块地方，这条缝不参与拖，纯粹是分隔 */
+.divider-h {
+  height: 5px;
+  flex-shrink: 0;
+  background: var(--color-border);
+}
+
+/* 一条带里的几栏；栏宽由 .file-panel 上的内联 style 给，
+   没拖过分栏的就是 1 1 0（等分），拖过的按像素走但仍允许被 flex 夹短 */
+.file-columns {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  /* 一条带里的栏多到放不下时横向滚，别让右边那栏被压到预览栏底下去 */
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -406,20 +422,48 @@
   overflow-y: hidden;
 }
 
-/* 拖着标签划过列区时整块亮一下：在这儿松手会在右边拆出一栏 */
-.miller-split-drop {
+/* 拖着标签划过某一栏时的蒙层：整栏压暗，只有要落的那一块亮着 —— 松手之后屏幕长什么样，
+   先照给你看（VSCode 拖编辑器那个）。pointer-events:none，事件照样落到底下那一栏上 */
+.panel-drop-mask {
   position: absolute;
-  inset: 6px;
-  z-index: 3;
+  inset: 0;
+  z-index: 4;
+  background: var(--color-overlay);
+  pointer-events: none;
+}
+
+.panel-drop-zone {
+  position: absolute;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px dashed var(--color-primary);
   border-radius: var(--radius-card);
+  /* 亮着的那块还得看得见底下的列表，所以只罩一层极淡的主色底 */
   background: var(--color-primary-faint);
   color: var(--color-primary-text);
   font-size: 12px;
-  pointer-events: none;
+}
+
+/* 四块方位各占半边，正中整块亮 = 并进这一栏。和 FilePanel 里 EDGE 那套分法一一对应 */
+.panel-drop-zone.is-left {
+  inset: 4px 50% 4px 4px;
+}
+
+.panel-drop-zone.is-right {
+  inset: 4px 4px 4px 50%;
+}
+
+.panel-drop-zone.is-top {
+  inset: 4px 4px 50% 4px;
+}
+
+.panel-drop-zone.is-bottom {
+  inset: 50% 4px 4px 4px;
+}
+
+.panel-drop-zone.is-center {
+  inset: 4px;
 }
 
 /* 列数少时每列均分整栏；多到放不下就按 220 的底线横向滚动 */
