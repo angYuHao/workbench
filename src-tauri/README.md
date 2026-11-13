@@ -60,6 +60,14 @@ grep -c 'commands::' src/lib.rs
 
 去重只认名字（`same_program`）：名字相等、或者去掉标点后互为一段（短于 4 字的段不算）。目标文件相同**不能**当判据——Steam 全家共用 `steam.exe`、UWP 共用 `ApplicationFrameHost.exe`，按文件去重会把除第一张之外的全吞掉，当初连 Steam 本身都进不了页面。
 
+## 「新建」那张单子：读注册表的 ShellNew，别抄名单
+
+`services/shellnew.rs`。资源管理器右键「新建」里列了什么，这页就列什么 —— 判据是注册表里有没有一条能建出文件的 `ShellNew`（`NullFile` 空文件 / `Data` 模板字节 / `FileName` 模板文件；只有 `Command` 的走 DDE，建不出来，不收）。装了什么就有什么，抄死名单的话换了机器就对不上。
+
+**`ShellNew` 有三种放法，少认一种就少一整列菜单**：挂在扩展名自己身上（老登记法）、挂在它默认值指的那个类上（经典写法 `.txt` → `txtfile\ShellNew`）、挂在扩展名自己的一个子键上（本机 WPS 就这么干：`.docx\WPS.Docx.6\ShellNew`）。本机实测 `.txt`、`.bmp` 三种位置都没有，所以那张表里就是没有「文本文档」—— 这不是漏，是这台机器的原生资源管理器同样建不出来。类型名也不自己编，取 `SHGetFileInfo` 的 `szTypeName`（`win::shell::type_name`，探一个不存在的文件名即可），和「类型」列同一个来源。
+
+`.lnk` / `.library-ms` / `.contact` 系统登记了但原生菜单不摆，这里跟着不摆：快捷方式建完要立刻弹「选取指向何处」向导，我们不做那个向导，留一个谁也不指向的 .lnk 只是垃圾。
+
 ## 智能分类只有三步
 
 `services/ai/categorize`：本机记忆 → 大模型 → 联网搜索。**分类规则不参与**——那张表只决定桌面上文件挪去哪个文件夹（`services::desktop::match_category`），跟「这台机器装了什么程序」是两回事，所以 `reserved`（规则占用的分类名）那一整套禁令已经拆掉了。

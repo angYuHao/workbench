@@ -1,13 +1,47 @@
-//! 交给 shell 的两个动作：用默认方式打开一个路径、在资源管理器里选中它。
-//! 都是 `ShellExecute` 一层薄薄的包装，失败要说得出口（打开失败得让用户看见为什么）。
+//! 交给 shell 的几个动作：用默认方式打开一个路径、在资源管理器里选中它、问一个类型叫什么。
+//! 都是 `ShellExecute` / `SHGetFileInfo` 一层薄薄的包装，失败要说得出口（打开失败得让用户看见为什么）。
 use windows::core::PCWSTR;
-use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
+use windows::Win32::UI::Shell::{
+    SHGetFileInfoW, SHFILEINFOW, SHGFI_TYPENAME, SHGFI_USEFILEATTRIBUTES, ShellExecuteW,
+};
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 use crate::error::{AppError, AppResult};
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// 资源管理器「类型」列那串名字（"文本文档"、"Markdown 源文件"），也就是「新建」菜单上
+/// 每个类型显示的那个词。文件名不必真的存在：`SHGFI_USEFILEATTRIBUTES` 让它只按扩展名查关联，
+/// 不碰磁盘 —— 枚举一百个扩展名时这点很要紧。
+pub fn type_name(file_name: &str) -> Option<String> {
+    let name = wide(file_name);
+    let mut info = SHFILEINFOW::default();
+    let ok = unsafe {
+        SHGetFileInfoW(
+            PCWSTR(name.as_ptr()),
+            FILE_ATTRIBUTE_NORMAL,
+            Some(&mut info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_TYPENAME | SHGFI_USEFILEATTRIBUTES,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let end = info
+        .szTypeName
+        .iter()
+        .position(|c| *c == 0)
+        .unwrap_or(info.szTypeName.len());
+    let text = String::from_utf16_lossy(&info.szTypeName[..end]).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 /// 用系统默认程序打开文件或 URL。

@@ -66,6 +66,22 @@ export function createFolder(parent: string, name: string) {
   return invoke<string>("create_folder", { parent, name });
 }
 
+/** 「新建 >」里的一项：扩展名 + 资源管理器给这个类型起的名字 */
+export interface NewType {
+  ext: string;
+  label: string;
+}
+
+/** 这台机器能新建哪些文件类型（读注册表的 ShellNew，和原生同一张单子）。只读，不改库 */
+export function getShellNew() {
+  return invoke<NewType[]>("get_shell_new");
+}
+
+/** 按类型建一个文件，内容照系统登记的模板来。同名自己让位，返回建出来的路径 */
+export function createFile(parent: string, ext: string) {
+  return invoke<string>("create_file", { parent, ext });
+}
+
 /** 改名。库里那条别名/说明跟着搬，所以算改了库 */
 export function renamePath(path: string, newName: string) {
   return write<string>("rename_path", "files", { path, newName });

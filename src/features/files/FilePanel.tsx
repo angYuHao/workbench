@@ -6,7 +6,7 @@ import useFileActions from "./useFileActions";
 import FileColumn from "./FileColumn";
 import PanelTabs from "./PanelTabs";
 import { visibleNodes } from "./listing";
-import { sortLabel } from "../../utils/sort";
+import { sortMenuEntries } from "./sortMenu";
 import { formatBytes } from "../../utils/humanize";
 import { revealInExplorer, openPath } from "../../api/shell";
 import { ContextMenu, message } from "../../ui";
@@ -84,7 +84,7 @@ export default function FilePanel({
     backIn,
     forwardIn,
     upIn,
-    cycleSortIn,
+    setSortIn,
     selectAllIn,
     clearSelection,
     togglePin,
@@ -171,10 +171,10 @@ export default function FilePanel({
     items.push({ label: "重新读取", onClick: () => void actions.refresh() });
     if (col) {
       const here = col.path;
-      /** 列顶上那条头行撤掉了，排序入口挪到这里：点一次换下一档，名称/大小/时间各自正反 */
       items.push({
-        label: `排序：${sortLabel(col.sort, col.sortDesc)}`,
-        onClick: () => cycleSortIn(panel.id, focusIndex),
+        key: "sort",
+        label: "排序",
+        children: sortMenuEntries(col.sort, col.sortDesc, (k, d) => setSortIn(panel.id, focusIndex, k, d)),
       });
       items.push({ label: pinned.includes(here) ? "从收藏里移除这里" : "收藏这里", onClick: () => void togglePin(here) });
     }

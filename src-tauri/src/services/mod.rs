@@ -6,6 +6,7 @@ pub mod desktop;
 pub mod files;
 pub mod installed;
 pub mod settings;
+pub mod shellnew;
 pub mod totp;
 pub mod totp_backup;
 pub mod usage;

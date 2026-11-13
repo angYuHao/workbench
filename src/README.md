@@ -6,7 +6,7 @@ app/                  外壳：AppLayout、Sidebar（底部是设置入口）、
 features/apps/        AppsView（「应用」页：注册表里的已安装程序）+ AppIconGrid
 features/bookmarks/   BookmarksView + BookmarkAnalysisModal + useBookmarkAnalysis
 features/drawer/      DrawerStrip —— 顶边那块搜索面板（全部应用 / 全部网页两栏、各自滚、可打字可点开）
-features/files/       FilesView（横带 × 每带多栏 × 每栏多标签 × 每标签一串 Miller 列，浏览整台机器；带由栏上的 rowId 分组得来，上下拆栏就是新起一条带）+ FileHeader（页级表头：面包屑地址行在上、标签行在下，横跨整块内容区并跟着当前栏走；点空白或 Ctrl+L 可输入整条路径）+ FilePanel（一栏：列区/状态条，拖标签划过时按方位报落点并压暗整栏，排序和批量动作都收进右键菜单）+ FileColumn（一列：目录内容，不带头行）+ listing（筛和排）+ useFileActions（删·拷·搬·刷新的共同入口，右键菜单和键盘都走它）+ PreviewPanel（选中具体文件才弹出的右栏）/ OfficePreview / TextPreview / PreviewError
+features/files/       FilesView（横带 × 每带多栏 × 每栏多标签 × 每标签一串 Miller 列，浏览整台机器；带由栏上的 rowId 分组得来，上下拆栏就是新起一条带）+ FileHeader（页级表头：面包屑地址行在上、标签行在下，横跨整块内容区并跟着当前栏走；点空白或 Ctrl+L 可输入整条路径）+ FileToolbar（地址栏和标签栏中间那条命令栏：新建/剪/拷/粘/改名/删 + 排序、查看两个下拉 + 更多 + 预览钉住；「新建」的单子来自后端读的系统登记表，其余只是把右键菜单和快捷键里现成的动作摆到明面上）+ FilePanel（一栏：列区/状态条，拖标签划过时按方位报落点并压暗整栏，排序和批量动作都收进右键菜单）+ FileColumn（一列：目录内容，不带头行）+ listing（筛和排）+ useFileActions（删·拷·搬·刷新的共同入口，右键菜单和键盘都走它）+ PreviewPanel（选中具体文件才弹出的右栏）/ OfficePreview / TextPreview / PreviewError
 features/settings/    SettingsModal + 各个 Section + 编辑弹窗
 shared/               两个以上功能共用的界面件与 hook（CategoryTree、useCategoryScaffold、SelectionBar、SmartCategorizeModal、useIdSelection、useSmartScope、dragItem…）
 tools/                工具箱，一个工具一个目录 → 见 tools/README.md

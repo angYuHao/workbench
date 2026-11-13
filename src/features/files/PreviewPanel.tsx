@@ -75,7 +75,7 @@ function dirOf(filePath: string): string {
 }
 
 /** md 里的相对路径是相对这篇 md 的，而预览页跑在应用自己的 origin 上，
-    交给浏览器解析会指向 localhost:1420 而 404。这里手动拼成绝对路径再走 asset 协议。 */
+    交给浏览器解析会指向 localhost:1421 而 404。这里手动拼成绝对路径再走 asset 协议。 */
 function resolveMdSrc(url: string, baseDir: string): string {
   if (USABLE_URL_RE.test(url)) return url;
   if (/^#/.test(url)) return defaultUrlTransform(url);

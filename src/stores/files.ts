@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import * as api from "../api/files";
+import type { NewType } from "../api/files";
 import { getSettings, setSetting } from "../api/settings";
 import { previewKind } from "../utils/fileKind";
 import { parentOf, folderName, isUnder, samePath } from "../utils/paths";
-import { SORT_ORDER } from "../utils/sort";
 import type { DriveInfo, FileNode, FileRecord, KnownFolder, ReadTextResult } from "../types";
 
 /** 上次开的那几栏、每栏那几个标签、各自走到哪个目录、拖过的栏宽 */
@@ -12,6 +12,8 @@ const LAYOUT_KEY = "files.layout";
 const PIN_KEY = "files.pinned";
 /** 隐藏和系统项摆不摆 */
 const HIDDEN_KEY = "files.showHidden";
+/** 预览那块是不是常驻。关着时它只在选中具体文件那一刻弹出来 */
+const PREVIEW_KEY = "files.previewPinned";
 
 /** 按哪一列排。大小和时间都从后端那两个字段来 */
 export type SortKey = "name" | "size" | "modified";
@@ -82,6 +84,7 @@ export interface PasteResult {
  */
 type UndoOp =
   | { kind: "folder"; path: string }
+  | { kind: "file"; path: string }
   | { kind: "rename"; from: string; to: string }
   | { kind: "paste-copy"; paths: string[] }
   | { kind: "paste-move"; from: string[]; to: string[] }
@@ -278,6 +281,8 @@ interface FilesStore {
   knownFolders: KnownFolder[];
   pinned: string[];
   showHidden: boolean;
+  /** 预览那块常驻否：开着它就一直占在右边（没选中时是空态），关着才只在选中文件那一下弹 */
+  previewPinned: boolean;
   panels: FilePanel[];
   activePanelId: string | null;
   /** 正被拖着的那颗标签。只在拖拽期间有值，不进布局也不落库 */
@@ -306,8 +311,8 @@ interface FilesStore {
   upIn: (panelId: string) => Promise<void>;
   focusColIn: (panelId: string, colIndex: number) => Promise<void>;
   setKeywordIn: (panelId: string, text: string) => void;
-  /** 点排序按钮：名称↑ → 名称↓ → 大小↑ → 大小↓ → 时间↑ → 时间↓，再回到名称↑ */
-  cycleSortIn: (panelId: string, colIndex: number) => void;
+  /** 排序菜单：直接点定「按什么、升还是降」 */
+  setSortIn: (panelId: string, colIndex: number, sort: SortKey, desc: boolean) => void;
   setViewIn: (panelId: string, view: "list" | "detail") => void;
   activatePanel: (panelId: string) => Promise<void>;
   activateTab: (panelId: string, tabId: string) => Promise<void>;
@@ -338,6 +343,8 @@ interface FilesStore {
       后台标签不在这儿读，等切过去时 activateTab 补 */
   reloadTabs: () => Promise<void>;
   toggleShowHidden: (on: boolean) => Promise<void>;
+  /** 工具栏那颗「预览」：钉住与否只影响右边那块在不在，不改选中 */
+  togglePreview: (on: boolean) => void;
   togglePin: (path: string) => Promise<void>;
   /** 重新读一遍当前列：F5 和写操作之后用 */
   refreshActive: () => Promise<void>;
@@ -357,6 +364,11 @@ interface FilesStore {
   /** 当前列选中的那串路径 */
   selectedPaths: () => string[];
   createFolderHere: (name: string) => Promise<void>;
+  /** 「新建 >」那张单子：这台机器登记了哪些文件类型能新建。第一次展开菜单时才去读 */
+  newTypes: NewType[];
+  loadNewTypes: () => Promise<void>;
+  /** 按类型在当前列建一个文件（内容照系统的 ShellNew 模板） */
+  createFileHere: (ext: string) => Promise<void>;
   renameSelected: (newName: string) => Promise<void>;
   /** 多选就是删这几种；toTrash 走回收站，false 是彻底删 */
   deleteSelected: (toTrash: boolean) => Promise<number>;
@@ -373,6 +385,8 @@ export const useFilesStore = create<FilesStore>((set, get) => {
   let settleTimer: number | undefined;
   /** 预览请求的序号：后点的覆盖先点的，先点的那次回来时自己作废 */
   let previewSeq = 0;
+  /** 「新建」那张单子在读没读：读一次要开上千个注册表键，别让人连点菜单读几遍 */
+  let loadingNewTypes = false;
   /** 最近几步写操作的反向动作。只在本会话里留着，重启就清空 */
   const undos: UndoOp[] = [];
   const UNDO_LIMIT = 20;
@@ -669,11 +683,13 @@ export const useFilesStore = create<FilesStore>((set, get) => {
     knownFolders: [],
     pinned: [],
     showHidden: false,
+    previewPinned: false,
     panels: [],
     activePanelId: null,
     dragTab: null,
     dragFiles: null,
     icons: {},
+    newTypes: [],
     record: null,
     preview: null,
     authorizedFor: null,
@@ -686,7 +702,7 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       ]);
       const pinned = parseStringList(settings[PIN_KEY]);
       const showHidden = settings[HIDDEN_KEY] === "1";
-      set({ drives, knownFolders, pinned, showHidden });
+      set({ drives, knownFolders, pinned, showHidden, previewPinned: settings[PREVIEW_KEY] === "1" });
 
       const saved = parseLayout(settings[LAYOUT_KEY]);
       /** 先按读到的顺序把栏建出来，再按 row 分带 —— 老布局没 row，全部落在第 0 带，等于以前那一横排 */
@@ -823,13 +839,12 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       if (!panel || !tab) return;
       patchCol(panel.id, tab.id, focusedCol(tab).id, (c) => ({ ...c, keyword: text }));
     },
-    cycleSortIn: (panelId, colIndex) => {
+    setSortIn: (panelId, colIndex, sort, desc) => {
       const { panel, tab } = find(panelId);
       const col = tab?.cols[colIndex];
       if (!panel || !tab || !col) return;
-      const at = SORT_ORDER.findIndex((o) => o.key === col.sort && o.desc === col.sortDesc);
-      const next = SORT_ORDER[(at + 1) % SORT_ORDER.length];
-      patchCol(panel.id, tab.id, col.id, (c) => ({ ...c, sort: next.key, sortDesc: next.desc }));
+      if (col.sort === sort && col.sortDesc === desc) return;
+      patchCol(panel.id, tab.id, col.id, (c) => ({ ...c, sort, sortDesc: desc }));
       settle();
     },
     setViewIn: (panelId, view) => {
@@ -1073,6 +1088,10 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       void setSetting(HIDDEN_KEY, on ? "1" : "0").catch(() => undefined);
       await get().reloadTabs();
     },
+    togglePreview: (on) => {
+      set({ previewPinned: on });
+      void setSetting(PREVIEW_KEY, on ? "1" : "0").catch(() => undefined);
+    },
     togglePin: async (path) => {
       const list = get().pinned;
       const next = list.includes(path) ? list.filter((p) => p !== path) : [...list, path];
@@ -1160,6 +1179,37 @@ export const useFilesStore = create<FilesStore>((set, get) => {
       pushUndo({ kind: "folder", path: made });
       await loadColumn(cur.panel.id, cur.tab.id, cur.col.id);
     },
+    loadNewTypes: async () => {
+      /** 读一次要开上千个注册表键，不该在启动路上；也只允许读一次 —— 装完软件重启才有变化 */
+      if (loadingNewTypes) return;
+      if (get().newTypes.length) return;
+      loadingNewTypes = true;
+      try {
+        const items = await api.getShellNew();
+        set({ newTypes: items });
+      } catch {
+        // 读不出来就当没这个菜单：那颗按钮还剩「文件夹」一项，不该因为注册表报错弹红条
+      } finally {
+        loadingNewTypes = false;
+      }
+    },
+    createFileHere: async (ext) => {
+      const cur = currentCol();
+      if (!cur) return;
+      const made = await api.createFile(cur.col.path, ext);
+      pushUndo({ kind: "file", path: made });
+      await loadColumn(cur.panel.id, cur.tab.id, cur.col.id);
+      /** 刚建出来的那一项直接选中：十有八九下一步就是给它改名 */
+      const col = get()
+        .panels.find((p) => p.id === cur.panel.id)
+        ?.tabs.find((t) => t.id === cur.tab.id)
+        ?.cols.find((c) => c.id === cur.col.id);
+      if (col?.nodes.some((n) => n.path === made)) {
+        patchCol(cur.panel.id, cur.tab.id, cur.col.id, (c) => ({ ...c, selected: [made], anchor: made }));
+        settle();
+        await syncPreview();
+      }
+    },
     renameSelected: async (newName) => {
       const cur = currentCol();
       if (!cur || cur.col.selected.length !== 1) return;
@@ -1206,6 +1256,13 @@ export const useFilesStore = create<FilesStore>((set, get) => {
           await api.deletePaths([op.path], false);
           touch(parentOf(op.path));
           result = { ok: true, text: "已撤销新建文件夹" };
+          break;
+        }
+        case "file": {
+          /** 新建出来的文件：送回收站，别原地抹掉 —— 用户可能已经往里写了东西 */
+          await api.deletePaths([op.path], true);
+          touch(parentOf(op.path));
+          result = { ok: true, text: "已撤销新建文件（原件进了回收站）" };
           break;
         }
         case "rename": {

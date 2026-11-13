@@ -157,6 +157,40 @@
   padding: 6px 10px;
 }
 
+/* 导航栏和标签栏中间那条命令栏（照 Win11 资源管理器那条排）：左边一组建/剪/拷/粘/改名/删，
+   中间排序和查看，右边一颗预览。按钮全用现成的 text Button，这里只管排布、分组和「开着」那档底色 */
+.file-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.file-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 两组之间那道竖线：把「会动文件的」和「只是换个看法」分开，免得九颗按钮糊成一排 */
+.file-toolbar-group + .file-toolbar-group {
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--color-border);
+}
+
+.file-toolbar-gap {
+  flex: 1;
+}
+
+/* Button 自己没有按下态，预览钉住时靠这层底色说明它是开着的 */
+.file-toolbar-on {
+  background: var(--color-primary-faint);
+  color: var(--color-primary-text);
+}
+
 /* 地址栏：资源管理器那种逐层可点的面包屑。平时不画边框，鼠标进来才浮出一层底 */
 .crumb-bar {
   display: flex;

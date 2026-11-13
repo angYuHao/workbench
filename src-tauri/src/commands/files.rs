@@ -97,6 +97,18 @@ pub fn create_folder(parent: String, name: String) -> Result<String, String> {
     crate::services::files::create_folder(&parent, &name).map_err(|e| e.to_string())
 }
 
+/// 「新建 >」那张单子：这台机器上登记了哪些文件类型能新建。只读注册表，前端用 invoke
+#[tauri::command]
+pub fn get_shell_new() -> Vec<crate::services::shellnew::NewType> {
+    crate::services::shellnew::list()
+}
+
+/// 按类型建一个文件（内容照 ShellNew 的模板来）。和建文件夹一样只动磁盘
+#[tauri::command]
+pub fn create_file(parent: String, ext: String) -> Result<String, String> {
+    crate::services::shellnew::create_file(&parent, &ext).map_err(|e| e.to_string())
+}
+
 /// 改名。库里那条标注跟着走（`repoint_meta`），所以算改了库
 #[tauri::command]
 pub fn rename_path(state: State<AppState>, path: String, new_name: String) -> Result<String, String> {

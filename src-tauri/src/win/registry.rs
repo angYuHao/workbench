@@ -9,15 +9,17 @@ use windows::Win32::Foundation::{
     ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, FILETIME,
 };
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER,
-    HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_DWORD, REG_MULTI_SZ,
-    REG_SZ,
+    RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CLASSES_ROOT,
+    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_BINARY,
+    REG_DWORD, REG_MULTI_SZ, REG_SZ,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hive {
     Local,
     Current,
+    /// 文件关联那棵合并树：`.txt` → 类型名 → `ShellNew`（资源管理器「新建」那张单子）都住这儿
+    Classes,
 }
 
 /// 同一个键在 64 位机器上有两份视图：64 位程序装的、32 位程序装的（WOW6432Node）
@@ -32,6 +34,7 @@ impl Hive {
         match self {
             Hive::Local => HKEY_LOCAL_MACHINE,
             Hive::Current => HKEY_CURRENT_USER,
+            Hive::Classes => HKEY_CLASSES_ROOT,
         }
     }
 
@@ -40,6 +43,7 @@ impl Hive {
         match self {
             Hive::Local => "HKLM",
             Hive::Current => "HKCU",
+            Hive::Classes => "HKCR",
         }
     }
 }
@@ -70,6 +74,20 @@ impl Key {
 
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// 相对这个键再往下开一层。注册表里同一个东西有好几种放法（扩展名自己身上、
+    /// 它指的类上、它下面那个长得像类名的子键上），一层层跳比拿字符串拼整条路径不容易拼错
+    pub fn child(&self, sub_key: &str) -> Option<Key> {
+        let wide: Vec<u16> = sub_key.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut out = HKEY(std::ptr::null_mut());
+        let code = unsafe {
+            RegOpenKeyExW(self.hkey, PCWSTR(wide.as_ptr()), 0, KEY_READ, &mut out)
+        };
+        if code != ERROR_SUCCESS {
+            return None;
+        }
+        Some(Key { hkey: out, path: format!("{}\\{}", self.path, sub_key) })
     }
 
     /// 直接子键的名字。某个子键读不了就跳过它，不要因为一条烂项丢掉整片
@@ -172,6 +190,15 @@ impl Key {
         }
     }
 
+    /// 这个值在不在（不看内容、也不管是不是空串）。`ShellNew\NullFile` 就是一个空的 REG_SZ，
+    /// 用 string() 判会把它当成「没有」——那张「新建 > 文本文档」就是这么丢的
+    pub fn has_value(&self, value: &str) -> bool {
+        let name: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            RegQueryValueExW(self.hkey, PCWSTR(name.as_ptr()), None, None, None, None) == ERROR_SUCCESS
+        }
+    }
+
     pub fn dword(&self, value: &str) -> Option<u32> {
         let name: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
         let mut kind = REG_SZ;
@@ -192,6 +219,63 @@ impl Key {
         }
         Some(u32::from_le_bytes(buf))
     }
+
+    /// REG_BINARY 原样读出。`ShellNew` 的 `Data` 多数就是这个型（一小段模板字节，
+    /// 建出来的文件带正确的表头，双击能被对应程序认出来）
+    pub fn binary(&self, value: &str) -> Option<Vec<u8>> {
+        let name: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut kind = REG_BINARY;
+        let mut size = 0u32;
+        let code = unsafe {
+            RegQueryValueExW(
+                self.hkey,
+                PCWSTR(name.as_ptr()),
+                None,
+                Some(&mut kind),
+                None,
+                Some(&mut size),
+            )
+        };
+        if code != ERROR_SUCCESS || size == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; size as usize];
+        let mut got = size;
+        let code = unsafe {
+            RegQueryValueExW(
+                self.hkey,
+                PCWSTR(name.as_ptr()),
+                None,
+                Some(&mut kind),
+                Some(buf.as_mut_ptr()),
+                Some(&mut got),
+            )
+        };
+        // 和 string() 同一个道理：探测与读取之间被改大了就丢掉这一项，别拿半截当完整
+        if code != ERROR_SUCCESS && code != ERROR_MORE_DATA || got > size || kind != REG_BINARY {
+            return None;
+        }
+        buf.truncate(got as usize);
+        Some(buf)
+    }
+}
+
+/// 十六进制字符串形式的模板数据：老写法把 `Data` 存成 REG_EXPAND_SZ 的一串 hex（"0001020A…"），
+/// 每行 8 个字符、行内不留空格。读不出来就回 None，让调用方按「这条建不出来」处理。
+pub fn parse_hex(raw: &str) -> Option<Vec<u8>> {
+    let digits: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    if digits.is_empty() || !digits.len().is_multiple_of(2) || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(digits.len() / 2);
+    let bytes = digits.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let pair = std::str::from_utf8(&bytes[i..i + 2]).ok()?;
+        out.push(u8::from_str_radix(pair, 16).ok()?);
+        i += 2;
+    }
+    Some(out)
 }
 
 impl Drop for Key {
@@ -251,5 +335,34 @@ mod tests {
     fn a_missing_key_yields_nothing() {
         assert!(Key::open(Hive::Current, r"Software\这个键不存在呀", Arch::Native).is_none());
         assert!(Key::open(Hive::Local, r"SOFTWARE\Microsoft\ nonexistent", Arch::Wow32).is_none());
+    }
+
+    /// HKCR 是文件关联那棵合并树，「新建」那张单子全靠它：能开、能列、`.txt` 读得到
+    #[test]
+    fn the_classes_hive_reads_the_extension_tree() {
+        let root = Key::open(Hive::Classes, "", Arch::Native);
+        assert!(root.is_some(), "HKCR 打不开，这层的合并视图就没法用");
+        let kids = root.unwrap().child_names();
+        assert!(
+            kids.iter().any(|k| k == ".txt"),
+            "HKCR 列出来 {} 个键却没有 .txt，枚举那条路有问题",
+            kids.len()
+        );
+        let txt = Key::open(Hive::Classes, ".txt", Arch::Native);
+        assert!(txt.is_some(), ".txt 每个 Windows 都有，读不到就是这层的开法不对");
+        // 注意这里不断言 `.txt\ShellNew` 存在：现代 Windows 把它挂在类键上（本机是
+        // txtfilelegacy 那条链上根本没有，装了 WPS 的类型才挂在 `.docx\WPS.Docx.6\ShellNew`）。
+        // 那张单子到底有几种是机器的性质，services::shellnew 那边验
+    }
+
+    /// hex 字符串那版模板数据：空格和换行是排版用的，不算内容
+    #[test]
+    fn hex_template_data_parses_with_or_without_whitespace() {
+        assert_eq!(parse_hex("0001020A").unwrap(), vec![0x00, 0x01, 0x02, 0x0A]);
+        assert_eq!(parse_hex("0001 020A\n").unwrap(), vec![0x00, 0x01, 0x02, 0x0A]);
+        // 半个字节、非 hex、空串都不是能用的模板
+        assert!(parse_hex("001").is_none());
+        assert!(parse_hex("zz").is_none());
+        assert!(parse_hex("").is_none());
     }
 }

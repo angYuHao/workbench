@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { groupRows, useFilesStore } from "../../stores/files";
 import FileHeader from "./FileHeader";
+import FileToolbar from "./FileToolbar";
 import FilePanel from "./FilePanel";
 import { EmptyPanelTabs } from "./PanelTabs";
 import PreviewPanel from "./PreviewPanel";
@@ -103,6 +104,7 @@ export default function FilesView() {
     knownFolders,
     pinned,
     showHidden,
+    previewPinned,
     panels,
     activePanelId,
     icons,
@@ -213,8 +215,10 @@ export default function FilesView() {
     activeCol?.selected.length === 1
       ? activeCol.nodes.find((n) => n.path === activeCol.selected[0]) ?? null
       : null;
-  /** 预览栏只在选中具体文件时弹出来：选目录是「往下翻」的一步，多选也没法只讲一个，都收起 */
+  /** 预览栏只在选中具体文件时弹出来：选目录是「往下翻」的一步，多选也没法只讲一个，都收起。
+      工具栏那颗「预览」钉住之后就常驻，没选中的时候由 PreviewPanel 自己摆空态 */
   const previewNode = selectedNode && !selectedNode.isDir ? selectedNode : null;
+  const previewOpen = previewPinned || !!previewNode;
 
   /** 重命名和新建文件夹共用一个输入框弹窗：两者要问的就是一句话 */
   const [nameEdit, setNameEdit] = useState<{ mode: "new" | "rename" } | null>(null);
@@ -333,6 +337,7 @@ export default function FilesView() {
 
         <div className="file-main">
           <FileHeader panel={activePanel} />
+          <FileToolbar panel={activePanel} onNewFolder={openNewFolder} onRename={openRename} />
           {!panels.length && <EmptyPanelTabs />}
 
           <div className="file-panes">
@@ -349,7 +354,7 @@ export default function FilesView() {
                         <FilePanel
                           panel={p}
                           active={p.id === activePanelId}
-                          previewOpen={!!previewNode}
+                          previewOpen={previewOpen}
                           pinned={pinned}
                           clipboard={clipboard}
                           icons={icons}
@@ -371,7 +376,7 @@ export default function FilesView() {
               )}
             </div>
 
-            {previewNode && (
+            {previewOpen && (
               <>
                 <div className="divider-v" onMouseDown={startPreviewResize} />
 
@@ -388,7 +393,7 @@ export default function FilesView() {
                     node={previewNode}
                     record={record}
                     preview={preview}
-                    ready={authorizedFor === previewNode.path}
+                    ready={!!previewNode && authorizedFor === previewNode.path}
                   />
                 </div>
               </>

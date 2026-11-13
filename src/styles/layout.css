@@ -5,6 +5,12 @@
   outline-offset: 1px;
 }
 
+/* 下拉 / 右键共用的菜单行：hover 和「子菜单开着」同一种底色 */
+.menu-row:not([aria-disabled="true"]):hover,
+.menu-row[aria-expanded="true"] {
+  background: var(--color-hover-sunken);
+}
+
 /* ---- 页面骨架：工具栏 + 侧栏 + 内容区 ---- */
 .page {
   display: flex;

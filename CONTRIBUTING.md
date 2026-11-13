@@ -6,7 +6,7 @@
 
 ```bash
 npm ci                 # 依赖一律离线复用，别随手 npm install / cargo add
-npm run tauri dev      # 开发：vite 在 :1420，改前端即时热更，改 Rust 自动重编重启
+npm run tauri dev      # 开发：vite 在 :1421，改前端即时热更，改 Rust 自动重编重启
 npm run tauri build    # 打包（本机能不能出安装包看下一节）
 ```
 

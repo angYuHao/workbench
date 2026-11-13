@@ -260,7 +260,7 @@ fn split_ext(name: &str) -> (String, String) {
 }
 
 /// 同名不覆盖：`名字 (1).扩展名` 一路加到不撞为止，跟资源管理器一个口径
-fn free_name(dir: &Path, name: &str) -> String {
+pub(crate) fn free_name(dir: &Path, name: &str) -> String {
     let (base, ext) = split_ext(name);
     let mut candidate = name.to_string();
     let mut i = 1;

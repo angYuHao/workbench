@@ -143,6 +143,8 @@ pub fn run() {
             commands::files::read_text_file,
             commands::files::read_file_head,
             commands::files::create_folder,
+            commands::files::get_shell_new,
+            commands::files::create_file,
             commands::files::rename_path,
             commands::files::delete_paths,
             commands::files::copy_paths,
