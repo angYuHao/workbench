@@ -2,6 +2,7 @@ pub mod ai;
 pub mod bookmark_analysis;
 pub mod bookmarks;
 pub mod categories;
+pub mod cleanup;
 pub mod desktop;
 pub mod files;
 pub mod installed;

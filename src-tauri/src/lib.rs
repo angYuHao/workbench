@@ -145,6 +145,8 @@ pub fn run() {
             commands::files::create_folder,
             commands::files::get_shell_new,
             commands::files::create_file,
+            commands::cleanup::cleanup_scan,
+            commands::cleanup::cleanup_run,
             commands::files::rename_path,
             commands::files::delete_paths,
             commands::files::copy_paths,

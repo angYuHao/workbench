@@ -2,6 +2,7 @@ pub mod ai;
 pub mod bookmarks;
 pub mod categories;
 pub mod categorize;
+pub mod cleanup;
 pub mod desktop;
 pub mod files;
 pub mod notify;

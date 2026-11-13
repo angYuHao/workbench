@@ -1,8 +1,9 @@
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ShieldCheck, Wand2 } from "lucide-react";
+import { Eraser, ShieldCheck, Wand2 } from "lucide-react";
 import TotpTool from "./totp/TotpTool";
 import DesktopOrganizeTool from "./desktop-organize/DesktopOrganizeTool";
+import DiskCleanupTool from "./disk-cleanup/DiskCleanupTool";
 
 export interface ToolProps {
   onBack: () => void;
@@ -34,6 +35,14 @@ export const TOOLS: Tool[] = [
     keywords: ["桌面", "整理", "快捷方式", "分类规则", "关键词", "扩展名", "恢复", "清理", "organize"],
     icon: Wand2,
     component: DesktopOrganizeTool,
+  },
+  {
+    id: "disk-cleanup",
+    name: "C 盘磁盘清理",
+    description: "扫描临时文件、更新缓存、缩略图缓存、错误报告与回收站，勾选后安全清理 C 盘垃圾",
+    keywords: ["c盘", "磁盘", "清理", "垃圾", "临时文件", "缓存", "回收站", "空间", "cleanup", "disk"],
+    icon: Eraser,
+    component: DiskCleanupTool,
   },
 ];
 
