@@ -23,8 +23,10 @@
 //! - **刚弹出那 700ms**：`set_focus` 未必已经落定，这时候判「没焦点」会自己把自己关掉。
 //! - **焦点压根没落上来过**：有的全屏程序死占焦点，这时「没焦点」是常态不是「人走了」，
 //!   照它收会 弹出→收→弹出 地闪（光标一直待在顶边那三个像素里，收了马上又触发）。
-//! - **Engaged 那一下**：光标真的进过面板一次，才允许自动收起。所以点托盘的「显示主窗口」
-//!   （光标还在托盘上）不会一闪就没。
+//! - **Engaged 那一下**：光标真的进过面板一次，才允许自动收起。面板现在只可能被顶边划过弹出来，
+//!   而划过的那一刻光标就在面板里（触发区就是面板顶边那三个像素），所以 Show 的时候就当场记上
+//!   ENGAGED —— 快速划过之后光标已经在面板外，下一轮就该收回去。这道闸只在
+//!   「面板不是被划过叫出来的」（比如以后有别的入口直接 show）时才继续拦着，免得一闪就没。
 //! - **按住不放就不收**：正在拖东西、正在面板里选中文字时，光标迟早会越出矩形，
 //!   中途收掉等于把这次操作废了，所以左右中键有一个还按着就暂缓。
 
@@ -172,7 +174,10 @@ fn show_drawer(app: &AppHandle, work: &Work) {
     // 不划出来的时候它压根不在屏幕上
     let _ = w.set_focus();
     SHOWN_AT.store(now_ms(), Ordering::Relaxed);
-    ENGAGED.store(false, Ordering::Relaxed);
+    // 面板只可能是被顶边划出来的，而触发区就是面板顶上那三个像素 —— 光标此刻就在面板里，
+    // 等于「已经进来过」。必须在这儿记上，不能等轮询下一轮去判：快速划过时那 150ms 里
+    // 光标早出了矩形，只靠轮询永远补不上，结果就是弹出后收不回去。
+    ENGAGED.store(true, Ordering::Relaxed);
     HAD_FOCUS.store(false, Ordering::Relaxed);
 }
 
@@ -200,6 +205,22 @@ fn inside_window(app: &AppHandle, p: POINT) -> bool {
         && p.x < pos.x + size.width as i32
         && p.y >= pos.y
         && p.y < pos.y + size.height as i32
+}
+
+/// 这一轮该不该把面板收起来。抽成纯函数是为了能测：里面出过一个「快速划过顶边就收不回去」的
+/// bug —— `engaged` 只在光标被轮询**撞见**在面板里时才置上，而快速划过时那 150ms 里光标早出去了，
+/// 于是 `!engaged` 这道闸一直拦着，面板永远不收。现在 `engaged` 在 Show 的时候就当场记上（因为
+/// 触发区就在面板顶边，弹出那一刻光标必定在里面），这条判定才真正生效。
+///
+/// - `settling`：刚弹出的 700ms
+/// - `held`：左右中键任一按着
+/// - `inside`：光标此刻在不在面板里
+/// - `had_focus` / `focused`：焦点有没有到过面板 / 此刻还在不在
+fn decide(inside: bool, engaged: bool, had_focus: bool, focused: bool, settling: bool, held: bool) -> bool {
+    if settling || held || !engaged {
+        return false;
+    }
+    !inside || (had_focus && !focused)
 }
 
 /// 起轮询线程（整个进程只起一次）
@@ -244,15 +265,14 @@ pub fn start(app: &AppHandle) {
         }
         // 刚叫出来的这一小会儿（焦点未必已经落定）、正拖着东西、光标还没进过面板：
         // 这三样都先不收。除此之外不再有任何计时——离开即收。
-        if now_ms() - SHOWN_AT.load(Ordering::Relaxed) < SETTLE
-            || button_held()
-            || !ENGAGED.load(Ordering::Relaxed)
-        {
-            continue;
-        }
-        // 「离开了」有两种：光标划出矩形，或者鼠标还停在面板里但焦点已经被点走的别的窗口抢走
-        //（那种情况面板已经打字不了了，留着只是挡屏幕）
-        if !inside || (HAD_FOCUS.load(Ordering::Relaxed) && !focused) {
+        if decide(
+            inside,
+            ENGAGED.load(Ordering::Relaxed),
+            HAD_FOCUS.load(Ordering::Relaxed),
+            focused,
+            now_ms() - SHOWN_AT.load(Ordering::Relaxed) < SETTLE,
+            button_held(),
+        ) {
             hide_drawer(&app);
         }
     });
@@ -340,5 +360,52 @@ mod tests {
         let aux = RECT { left: -1920, top: 0, right: 0, bottom: 1080 };
         assert!(covers_monitor(&aux, &aux), "副屏那块是铺满的");
         assert!(!covers_monitor(&aux, &MON), "但它没盖住主屏");
+    }
+
+    /// 快速划过：弹出那一刻 `engaged` 就记上了，光标下一刻已在面板外 —— 必须收回去。
+    /// 这就是那个「弹出后不自动收回」的 bug，`engaged` 晚记一步就复现。
+    #[test]
+    fn a_quick_pass_off_the_panel_closes_it() {
+        assert!(
+            decide(false, true, false, false, false, false),
+            "光标出了面板就该收"
+        );
+        assert!(
+            decide(false, true, true, false, false, false),
+            "拿过焦点又出去了，一样收"
+        );
+    }
+
+    /// 光标还在面板里就不收：人正看着 / 正打字
+    #[test]
+    fn staying_inside_keeps_it_open() {
+        assert!(!decide(true, true, true, true, false, false));
+        assert!(!decide(true, true, false, false, false, false), "还没拿到焦点但在里面，先留着");
+    }
+
+    /// 刚弹出那 700ms 不收：焦点还没落上来，抢着判会自己把自己关掉
+    #[test]
+    fn the_settle_window_suppresses_the_close() {
+        assert!(!decide(false, true, true, false, true, false));
+    }
+
+    /// 按住鼠标不收：正在拖东西 / 选文字，光标越出矩形是正常的
+    #[test]
+    fn holding_a_button_suppresses_the_close() {
+        assert!(!decide(false, true, true, false, false, true));
+    }
+
+    /// 从没进过面板（不是划过叫出来的）不自动收：否则会 弹出→收→弹出 地闪
+    #[test]
+    fn an_engagement_that_never_happened_blocks_the_close() {
+        assert!(!decide(false, false, false, false, false, false));
+    }
+
+    /// 焦点被别的窗口抢走：光标还停在面板里也得收 —— 已经打字不了了，留着只挡屏幕
+    #[test]
+    fn losing_focus_after_having_it_closes_the_panel() {
+        assert!(decide(true, true, true, false, false, false));
+        // 但从没拿到过焦点（全屏程序死占着）就不按这条判，免得闪
+        assert!(!decide(true, true, false, false, false, false));
     }
 }
