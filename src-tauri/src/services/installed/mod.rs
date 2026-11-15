@@ -147,6 +147,35 @@ fn short_key(s: &str) -> String {
         .trim_end_matches("bit");
     keep.to_string()
 }
+
+/// 判重用的「去版本核」：削掉**带点的版本号串**（2.2.0 / 0.5.1 / 12.1.0.25865），
+/// 但保留单独一个标题数字（Halo 3 / Halo 4 是两个游戏，不能合并）。
+/// 必须在 name_key 之前做：name_key 会把点删掉，之后就分不清「2.2.0」和「220」了。
+/// 软件一更新注册表名字就换个版本号，靠这把尺子认出「还是同一个软件」，不再插新卡。
+fn core_key(s: &str) -> String {
+    let cs: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < cs.len() {
+        if cs[i].is_ascii_digit() {
+            let mut end = i;
+            while end < cs.len() && (cs[end].is_ascii_digit() || cs[end] == '.') {
+                end += 1;
+            }
+            let run: String = cs[i..end].iter().collect();
+            let is_version = run.split('.').count() >= 2
+                && run.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+            if !is_version {
+                out.push_str(&run);
+            }
+            i = end;
+        } else {
+            out.push(cs[i]);
+            i += 1;
+        }
+    }
+    name_key(&out)
+}
 /// 同步之前先过一遍过滤名单（设置 → 应用过滤）：命中的一律不收。
 /// 用户改过的东西（名字、别名、手动归好的分类）只插不改，一次同步不该把它们抹掉；
 /// 但已有卡片的**启动路径和图标**会顺手追回来 —— 那两样是机器上的事实，程序一更新就会变，

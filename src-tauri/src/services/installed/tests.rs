@@ -358,6 +358,73 @@ fn two_numbered_titles_are_two_programs() {
         "同名同版本才是同一个"
     );
 }
+
+/// 软件一更新注册表名字就换个版本号：得认出是同一个，不再插新卡
+#[test]
+fn an_update_with_a_new_version_number_reuses_the_card() {
+    let dir = sandbox("version-reuse");
+    let exe = touch(&dir, r"OpenCode\opencode.exe");
+    let c = conn();
+    c.execute(
+        "INSERT INTO apps (name, target, source) VALUES ('OpenCode 2.2.0', ?1, 'registry')",
+        params![exe],
+    )
+    .unwrap();
+    let e = Entry { display_icon: exe.clone(), ..entry("OpenCode 2.2.5") };
+
+    let report = plan_with(&c, &[e], &[], &dir.join("icons"), false);
+    assert_eq!(report.inserted, 0, "换个版本号不该再插一张：{report:?}");
+    assert_eq!(report.already, 1);
+    assert_eq!(rows(&c).len(), 1, "只该有一张 OpenCode：{:?}", rows(&c));
+}
+
+/// 历史上每更新一次插一张，库里已经攒下多版本卡片：这一遍把它们合并成一张
+#[test]
+fn existing_version_duplicates_collapse_to_one() {
+    let dir = sandbox("version-collapse");
+    let exe = touch(&dir, r"OpenCode\opencode.exe");
+    let c = conn();
+    for v in ["2.2.0", "2.2.5"] {
+        c.execute(
+            "INSERT INTO apps (name, target, source) VALUES (?1, ?2, 'registry')",
+            params![format!("OpenCode {v}"), exe],
+        )
+        .unwrap();
+    }
+    let e = Entry { display_icon: exe.clone(), ..entry("OpenCode 2.2.6") };
+
+    let report = plan_with(&c, &[e], &[], &dir.join("icons"), false);
+    assert_eq!(report.inserted, 0, "{report:?}");
+    assert!(report.removed >= 1, "存量重复该被合并：{report:?}");
+    let names = rows(&c);
+    assert_eq!(names.len(), 1, "多版本只留一张：{names:?}");
+}
+
+/// 去版本核只削带点的版本号串，单独一个标题数字（年份也算）要留着
+#[test]
+fn core_key_strips_versions_but_keeps_title_numbers() {
+    assert_eq!(core_key("OpenCode 2.2.0"), core_key("OpenCode 2.2.5"));
+    assert_eq!(core_key("Qoder CN 0.5.1"), core_key("Qoder CN 0.5.5"));
+    assert_ne!(core_key("Halo 3"), core_key("Halo 4"));
+    assert_ne!(core_key("Visual Studio 2019"), core_key("Visual Studio 2022"));
+}
+
+/// 合并存量重复时，两个编号不同的游戏不能被当成同一个软件
+#[test]
+fn collapse_keeps_two_numbered_titles_apart() {
+    let dir = sandbox("collapse-titles");
+    let a = touch(&dir, r"Halo3\halo.exe");
+    let b = touch(&dir, r"Halo4\halo.exe");
+    let c = conn();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('Halo 3', ?1, 'registry')", params![a])
+        .unwrap();
+    c.execute("INSERT INTO apps (name, target, source) VALUES ('Halo 4', ?1, 'registry')", params![b])
+        .unwrap();
+
+    let report = plan_with(&c, &[], &[], &dir.join("icons"), false);
+    assert_eq!(report.removed, 0, "两个游戏不该被合并：{report:?}");
+    assert_eq!(rows(&c).len(), 2);
+}
 /// 这条测的是「已有卡片直接 continue」那个洞——图标不更新就是这么来的。
 /// 这条测的是「已有卡片直接 continue」那个洞——图标不更新就是这么来的。
 #[test]

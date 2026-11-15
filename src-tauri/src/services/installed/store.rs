@@ -14,7 +14,7 @@ use crate::services::desktop::extract_icon;
 
 use super::filter::{find_program, hits, read_filters, system_root};
 use super::target::resolve;
-use super::{name_key, path_key, Entry, Found, Shortcut, SyncReport};
+use super::{core_key, name_key, path_key, Entry, Found, Shortcut, SyncReport};
 
 /// 试算里最多报几个被挡的名字，够看出规律就行
 const SAMPLES: usize = 12;
@@ -37,6 +37,9 @@ pub(crate) fn plan(
     // DisplayIcon 都是 steam.exe，按目标文件去重会把除第一个之外的全都吞掉（Steam 自己就这么没的）。
     // 值里存上那一行的 id 和路径：认成「已有」之后还要顺手把更新过的启动路径与图标追回来。
     let mut known: HashMap<String, Known> = HashMap::new();
+    // 第二把尺：按「去版本核」索引同一批卡片。软件一更新名字就换个版本号（OpenCode 2.2.0 →
+    // 2.2.5），name_key 那把尺认不出是同一个，会再插一张；这把削掉版本号的尺子负责认回来。
+    let mut known_core: HashMap<String, Known> = HashMap::new();
     // 本机还在的路径（含被过滤名单挡掉的）：给来源体检当第二把尺子用
     let mut live_targets: HashSet<String> = HashSet::new();
     let mut stmt = conn.prepare("SELECT id, name, target, icon_path FROM apps")?;
@@ -51,7 +54,8 @@ pub(crate) fn plan(
         ))
     })?;
     for row in rows.flatten() {
-        known.insert(name_key(&row.0), row.1);
+        known.insert(name_key(&row.0), row.1.clone());
+        known_core.insert(core_key(&row.0), row.1);
     }
 
     let mut report = SyncReport {
@@ -84,7 +88,10 @@ pub(crate) fn plan(
             continue;
         }
         let key = name_key(&entry.name);
-        if let Some(hit) = find_program(&known, &key).cloned() {
+        let hit = find_program(&known, &key)
+            .cloned()
+            .or_else(|| known_core.get(&core_key(&entry.name)).cloned());
+        if let Some(hit) = hit {
             report.already += 1;
             // 「已有」不等于「什么都不用做」：程序更新后启动路径和图标都会变，那两样是机器上的
             // 事实，不是用户在界面上改过的东西，该顺着这一次扫描追回来（图标不更新就是这么来的）
@@ -112,7 +119,8 @@ pub(crate) fn plan(
             )?;
             row.id = conn.last_insert_rowid();
         }
-        known.insert(key, row);
+        known.insert(key, row.clone());
+        known_core.insert(core_key(&entry.name), row);
         if resolved.found == Found::Shortcut {
             claimed.insert(path_key(&resolved.icons[0]));
         }
@@ -129,7 +137,10 @@ pub(crate) fn plan(
             continue;
         }
         report.scanned += 1;
-        if let Some(hit) = find_program(&known, &sc.key).cloned() {
+        let hit = find_program(&known, &sc.key)
+            .cloned()
+            .or_else(|| known_core.get(&core_key(&sc.name)).cloned());
+        if let Some(hit) = hit {
             report.already += 1;
             // 和注册表那一遍一样：认成已有之后，路径和图标还是要追一下更新
             if refresh(conn, &hit, &sc.target, &[sc.lnk.as_str(), sc.target.as_str()], icon_dir, dry)? {
@@ -160,7 +171,8 @@ pub(crate) fn plan(
             )?;
             row.id = conn.last_insert_rowid();
         }
-        known.insert(sc.key.clone(), row);
+        known.insert(sc.key.clone(), row.clone());
+        known_core.insert(core_key(&sc.name), row);
         // .lnk 那条路径也占个名，免得同一遍里换个写法又收一次。它不是一行卡片，id 留 0
         known.insert(lnk_key, Known { id: 0, target: String::new(), icon: None });
         report.inserted += 1;
@@ -172,6 +184,16 @@ pub(crate) fn plan(
     let (removed, removed_names) = sweep(conn, entries, &live_targets, dry)?;
     report.removed = removed;
     report.removed_names = removed_names;
+
+    // 存量收敛：以前每更新一次就插一张，库里已经攒下同一软件的多版本卡片。
+    // 判重那把尺只挡「以后不再插」，这些老卡片得在这儿合并掉。
+    let (dup_removed, dup_names) = collapse(conn, dry)?;
+    report.removed += dup_removed;
+    for n in dup_names {
+        if report.removed_names.len() < SAMPLES {
+            report.removed_names.push(n);
+        }
+    }
 
     report.total = if dry {
         (count_rows(conn)? + report.inserted).saturating_sub(report.removed)
@@ -225,6 +247,44 @@ fn sweep(conn: &Connection, entries: &[Entry], live_targets: &HashSet<String>, d
         }
     }
 
+    if !dry {
+        for (id, _) in &gone {
+            conn.execute("DELETE FROM apps WHERE id = ?1", params![id])?;
+        }
+    }
+    let count = gone.len();
+    let names = gone.into_iter().map(|(_, n)| n).take(SAMPLES).collect();
+    Ok((count, names))
+}
+
+/// 收敛存量重复：同一软件的多版本卡片（去版本核相同）只留一张。
+/// 留哪张：目标还在本机的那张优先，其次 id 小的（先收进来的）。`manual` 是用户自己加的，不动。
+/// 判重那把尺（known_core）只保证「以后不再插」，历史上攒下的重复靠这一遍合并。
+fn collapse(conn: &Connection, dry: bool) -> AppResult<(usize, Vec<String>)> {
+    let mut groups: HashMap<String, Vec<(i64, String, String)>> = HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, target FROM apps WHERE source IN ('registry', 'startmenu') ORDER BY id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })?;
+        for (id, name, target) in rows.flatten() {
+            groups.entry(core_key(&name)).or_default().push((id, name, target));
+        }
+    }
+    let mut gone: Vec<(i64, String)> = Vec::new();
+    for members in groups.into_values() {
+        if members.len() < 2 {
+            continue;
+        }
+        let mut members = members;
+        // 目标还在本机的排前面；都在或都不在就按 id 小的留
+        members.sort_by_key(|(id, _, target)| (!Path::new(target).exists(), *id));
+        for (id, name, _) in members.into_iter().skip(1) {
+            gone.push((id, name));
+        }
+    }
     if !dry {
         for (id, _) in &gone {
             conn.execute("DELETE FROM apps WHERE id = ?1", params![id])?;
